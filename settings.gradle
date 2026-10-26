@@ -1,0 +1,36 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven {
+            name = 'GitHubPackages'
+            url = uri('https://maven.pkg.github.com/PRIMARION/shared.springboot')
+            credentials {
+                username = providers.gradleProperty('gpr.user')
+                        .orElse(providers.environmentVariable('GITHUB_ACTOR'))
+                        .orNull
+                password = providers.gradleProperty('gpr.key')
+                        .orElse(providers.environmentVariable('GITHUB_TOKEN'))
+                        .orNull
+            }
+        }
+    }
+}
+
+rootProject.name = 'notraius.springboot'
+
+// Local development uses the sibling `shared` checkout via a composite build.
+// Standalone builds (Docker/CI without ../shared) resolve org.primarion:shared.springboot
+// from GitHub Packages instead.
+if (file('../shared').exists()) {
+    logger.lifecycle('Including sibling ../shared composite build')
+    includeBuild('../shared')
+} else {
+    logger.lifecycle('Using published shared library from GitHub Packages (../shared not found)')
+}

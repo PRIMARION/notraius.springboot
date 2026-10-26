@@ -1,0 +1,83 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '4.1.0'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+// #PAY-P9-149 doctrine: dependency locking to prevent silent version drift.
+dependencyLocking {
+	lockAllConfigurations()
+}
+
+group = 'org.primarion'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 25
+}
+
+dependencies {
+	implementation 'org.primarion:shared.springboot:2.1.0'
+	implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+	implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.flywaydb:flyway-database-postgresql'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	runtimeOnly 'org.postgresql:postgresql'
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+
+def loadDotEnv = { File envFile ->
+	if (envFile == null || !envFile.isFile()) return [:]
+	def props = [:]
+	envFile.withReader { reader ->
+		reader.eachLine { line ->
+			def trimmed = line.trim()
+			if (trimmed && !trimmed.startsWith('#') && trimmed.contains('=')) {
+				def idx = trimmed.indexOf('=')
+				def key = trimmed.substring(0, idx).trim()
+				def value = trimmed.substring(idx + 1).trim()
+				// Strip surrounding quotes so the test JVM sees the same value the
+				// runtime dotenv loader exposes: KEY="true" must bind as boolean true.
+				if (value.length() > 1 &&
+						((value.startsWith('"') && value.endsWith('"')) ||
+								(value.startsWith("'") && value.endsWith("'")))) {
+					value = value.substring(1, value.length() - 1)
+				}
+				if (System.getenv(key) == null) props[key] = value
+			}
+		}
+	}
+	return props
+}
+def dotEnv = loadDotEnv(rootProject.file('../notraius/.env')) ?: loadDotEnv(file('.env')) ?: loadDotEnv(file('../../../.env')) ?: [:]
+
+tasks.named('test') {
+	// No test sources yet — keep `test` green rather than failing on
+	// "no tests discovered".
+	failOnNoDiscoveredTests = false
+	useJUnitPlatform()
+	environment dotEnv
+}
+
+tasks.named('bootRun') {
+	environment dotEnv
+}
