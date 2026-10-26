@@ -34,6 +34,12 @@ public class NotraiusProperties {
      */
     private String payBaseUrl;
 
+    /**
+     * Base URL of the logistic microservice, used for service-to-service
+     * course/shipment reference operations as the notraius domain grows.
+     */
+    private String logisticBaseUrl;
+
     /** Platform target identifiers — never configurable: static constants. */
     private static final String PLATFORM_TARGET_PRIMARION = "PRIMARION";
     private static final String PLATFORM_TARGET_PAY = "PAY";

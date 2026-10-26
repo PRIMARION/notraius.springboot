@@ -10,7 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class InterServiceProperties {
 
     private Timeout pay = new Timeout();
-    
+    private Timeout logistic = new Timeout();
+
 
     @Getter
     @Setter

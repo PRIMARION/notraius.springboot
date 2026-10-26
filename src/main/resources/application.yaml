@@ -129,6 +129,8 @@ app:
 
   notraius:
     notificationsEnabled: ${NOTRAIUS_NOTIFICATIONS_ENABLED}
+    payBaseUrl: ${PAY_BASE_URL}
+    logisticBaseUrl: ${LOGISTIC_BASE_URL}
     # roleStandard, roleAdmin → SharedRoles constants; platformTarget* →
     # static constants
     platformCode: ${NOTRAIUS_PLATFORM_CODE:NOTRAIUS}
@@ -140,6 +142,9 @@ app:
     pay:
       connect-timeout-ms: ${NOTRAIUS_PAY_CONNECT_TIMEOUT_MS}
       read-timeout-ms: ${NOTRAIUS_PAY_READ_TIMEOUT_MS}
+    logistic:
+      connect-timeout-ms: ${NOTRAIUS_LOGISTIC_CONNECT_TIMEOUT_MS}
+      read-timeout-ms: ${NOTRAIUS_LOGISTIC_READ_TIMEOUT_MS}
 
   web:
     cors:
