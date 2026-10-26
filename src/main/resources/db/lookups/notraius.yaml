@@ -1,0 +1,8 @@
+# Notraius lookup exposure.
+#
+# Governance rules:
+#   - Reference data is READ-ONLY through this API. Writes belong to
+#     migrations / seed tooling.
+#   - Definitions arrive as the notraius domain grows. Today the host
+#     registers nothing — this empty file keeps the loader's scan valid.
+definitions: []
