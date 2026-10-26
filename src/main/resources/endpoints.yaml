@@ -1,0 +1,87 @@
+# Endpoints referenced by this microservice, resolved 100% dynamically through
+# the shared EndpointRegistry. Keys: <service>.<module>.<method>.
+# Values: { method, endpoint }.
+# Every surface the shared code owns or calls is declared here — even the ones
+# this service exposes itself — so shared clients (UserClient,
+# SubscriptionPayClient) and the e2e suites resolve paths from this file
+# instead of hardcoding them.
+endpoints:
+  notraius:
+    subscription:
+      current:
+        method: GET
+        endpoint: /api/v1/subscriptions/current
+      subscribe:
+        method: POST
+        endpoint: /api/v1/subscriptions/subscribe
+      cancel:
+        method: POST
+        endpoint: /api/v1/subscriptions/cancel
+      preferencesGet:
+        method: GET
+        endpoint: /api/v1/subscriptions/preferences
+      preferencesUpdate:
+        method: PUT
+        endpoint: /api/v1/subscriptions/preferences
+  pay:
+    subscription:
+      balance:
+        method: GET
+        endpoint: /api/v1/pay/subscriptions/users/{userId}/balance
+      debit:
+        method: POST
+        endpoint: /api/v1/pay/subscriptions/debit
+    payment:
+      findCurrency:
+        method: POST
+        endpoint: /api/v1/lookups/execute
+      createPayment:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments
+      getPaymentByReference:
+        method: GET
+        endpoint: /api/v1/pay/internal/payments/reference/{referenceId}
+      refundPayment:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments/{paymentId}/refund
+      settlePayment:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments/{paymentId}/settle
+      calculateCommissionFee:
+        method: POST
+        endpoint: /api/v1/pay/platform/commissions/calculate
+  primarion:
+    auth:
+      introspect:
+        method: POST
+        endpoint: /api/v1/internal/auth/introspect
+    user:
+      findById:
+        method: GET
+        endpoint: /api/v1/primarion/users/{id}
+      findByEmail:
+        method: GET
+        endpoint: /api/v1/primarion/users/email/{email}
+      findSystemUser:
+        method: GET
+        endpoint: /api/v1/primarion/users/system/user
+      findVerifiedUsers:
+        method: GET
+        endpoint: /api/v1/primarion/users/kyc/verified
+      isKycVerified:
+        method: GET
+        endpoint: /api/v1/primarion/users/{id}/kyc/verified
+    reputation:
+      getSummary:
+        method: GET
+        endpoint: /api/v1/primarion/reputation/users/{userId}
+    assessment:
+      createAssessment:
+        method: POST
+        endpoint: /api/v1/primarion/reputation/users/{userId}/assessments
+      listAssessments:
+        method: GET
+        endpoint: /api/v1/primarion/reputation/assessments
+      getAssessment:
+        method: GET
+        endpoint: /api/v1/primarion/reputation/assessments/{id}
