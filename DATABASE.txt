@@ -1,0 +1,293 @@
+================================================================================
+NOTARIUS — BASE DE DONNÉES COMPLÈTE (SCHÉMA LOGIQUE)
+================================================================================
+Version : 4.0 (Consolidée)
+Cible   : PostgreSQL 16+
+
+Règles générales :
+  - Toutes les tables ont : id (UUID), created_at, updated_at, created_by.
+  - Le versioning se fait via notarius.logs (old_data / new_data).
+  - Les liens inter-modules (ex: Logistic) sont des UUID sans contrainte FK.
+
+================================================================================
+1. SCHÉMA notarius — Données de référence et paramétrage
+================================================================================
+
+--------------------------------------------------------------------------------
+1.1 notarius.entities
+--------------------------------------------------------------------------------
+Rôle : Décrit chaque entité métier (property, lease, visit, deposit…).
+Colonnes :
+  - id              UUID PK
+  - code            VARCHAR(50)    NOT NULL
+  - label           VARCHAR(100)   NOT NULL
+
+--------------------------------------------------------------------------------
+1.2 notarius.types
+--------------------------------------------------------------------------------
+Rôle : Catalogue des types métier rattachés à une entité.
+Colonnes :
+  - id              UUID PK
+  - entity_id       UUID FK → notarius.entities(id)
+  - type_id         UUID FK → notarius.types(id) (NULL si racine)
+  - code            VARCHAR(50)    NOT NULL
+  - label           VARCHAR(100)   NOT NULL
+  - description     TEXT
+
+--------------------------------------------------------------------------------
+1.3 notarius.statuses
+--------------------------------------------------------------------------------
+Rôle : Statuts locaux (DRAFT, ACTIVE, PAID, etc.).
+Colonnes :
+  - id              UUID PK
+  - entity_id       UUID FK → notarius.entities(id)
+  - code            VARCHAR(50)    NOT NULL
+  - label           VARCHAR(100)   NOT NULL
+  - description     TEXT
+
+--------------------------------------------------------------------------------
+1.4 notarius.validities
+--------------------------------------------------------------------------------
+Rôle : Fenêtre temporelle réutilisable.
+Colonnes :
+  - id              UUID PK
+  - from_date_time  TIMESTAMPTZ    NOT NULL
+  - to_date_time    TIMESTAMPTZ    (NULL si permanent)
+
+--------------------------------------------------------------------------------
+1.5 notarius.policies
+--------------------------------------------------------------------------------
+Rôle : Règles globales éditables uniquement par l'admin.
+Colonnes :
+  - id              UUID PK
+  - entity_id       UUID FK → notarius.entities(id)
+  - type_id         UUID FK → notarius.types(id)
+  - title           VARCHAR(100)   NOT NULL
+  - code            VARCHAR(50)
+  - description     TEXT
+  - min             NUMERIC(15,2)
+  - max             NUMERIC(15,2)
+  - mandatory       BOOLEAN        NOT NULL
+  - status_id       UUID FK → notarius.statuses(id)
+  - state_id      UUID           (Ref externe shared)
+
+--------------------------------------------------------------------------------
+1.6 notarius.rules
+--------------------------------------------------------------------------------
+Rôle : Règles globales au bien (ex: animaux).
+Colonnes :
+  - id              UUID PK
+  - title           VARCHAR(100)   NOT NULL
+  - visibility      VARCHAR(12)    NOT NULL
+  - description     TEXT           NOT NULL
+  - version         INT            NOT NULL
+  - user_id         UUID
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+1.7 notarius.amenities
+--------------------------------------------------------------------------------
+Rôle : Équipements globaux (ex: Piscine, Climatisation, Sécurité).
+Colonnes :
+  - id              UUID PK
+  - type_id         UUID FK → notarius.types(id) 
+  - data_type       VARCHAR(12)    NOT NULL          (EX: BOOLEAN, INTEGER, STRING)
+  - code            VARCHAR(50)    NOT NULL          (EX: POOL, AC, SECURITY)
+  - label           VARCHAR(100)   NOT NULL
+  - description     TEXT
+  - status_id       UUID FK → notarius.statuses(id)  (PENDING, ACTIVE)
+  - user_id         UUID           (NULL si créé par l'Admin, UUID si créé par le User)
+
+----
+
+--------------------------------------------------------------------------------
+1.8 notarius.durations
+--------------------------------------------------------------------------------
+Rôle : Catalogue des quantités de temps admin-seedable (SECOND, MINUTE, HOUR,
+       DAY, MONTH). value = combien d'unités de code (ex: HOUR + value 10 =
+       10 heures). Une durée, pas une fréquence : ça dit combien de temps
+       dure une unité tarifaire, pas à quelle vitesse quelque chose répète.
+Colonnes :
+  - id              UUID PK
+  - code            VARCHAR(50)    NOT NULL
+  - value           INT
+
+================================================================================
+3. SCHÉMA property — Les Biens Immobiliers
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1 property.properties
+--------------------------------------------------------------------------------
+Rôle : Le bien immobilier.
+Colonnes :
+  - id              UUID PK
+  - title           VARCHAR(255)   NOT NULL
+  - user_id         UUID           (Propriétaire)
+  - status_id       UUID FK → notarius.statuses(id)
+  - type_id         UUID FK → notarius.types(id)
+  - currency_id     UUID
+  - description     TEXT
+  - location_id     UUID           (Ref externe Logistic)
+
+--------------------------------------------------------------------------------
+3.2 property.pricings
+--------------------------------------------------------------------------------
+Rôle : Grille tarifaire du bien.
+Colonnes :
+  - id              UUID PK
+  - property_id     UUID FK → property.properties(id)
+  - type_id         UUID FK → notarius.types(id)     (MONTHLY, NIGHTLY…)
+  - duration_id     UUID FK → notarius.durations(id) 
+  - amount          NUMERIC(15,2)  NOT NULL
+  - version         INT            NOT NULL
+  - validity_id     UUID FK → notarius.validities(id)
+  
+
+--------------------------------------------------------------------------------
+3.3 property.policies
+--------------------------------------------------------------------------------
+Rôle : Configuration par le propriétaire des règles (lié au type de bail).
+Colonnes :
+  - id              UUID PK
+  - pricing_id      UUID FK → property.pricings(id)
+  - policy_id       UUID FK → notarius.policies(id)
+  - value           NUMERIC(15,2)  (Ex: 2 pour ADVANCES, ou 150000 pour SECURITY)
+  - status_id       UUID FK → notarius.statuses(id)
+  - version         INT            NOT NULL
+  
+--------------------------------------------------------------------------------
+3.5 property.rules
+--------------------------------------------------------------------------------
+Rôle : Règles spécifiques au bien (ex: animaux).
+Colonnes :
+  - id              UUID PK
+  - property_id     UUID FK → property.properties(id)
+  - rule_id         UUID           (Lien vers référentiel)
+  - validity_id     UUID FK → notarius.validities(id)
+  - version         INT            NOT NULL
+----------------------------------------------------------------------------
+3.6 property.amenities
+--------------------------------------------------------------------------------
+Rôle : Les équipements spécifiques à un bien.
+Colonnes :
+  - id              UUID PK
+  - property_id     UUID FK → property.properties(id)
+  - amenity_id      UUID FK → notarius.amenities(id)
+  - value           VARCHAR(255)   (Ex: "true", "2", "24/7")
+  - status_id       UUID FK → notarius.statuses(id)
+  
+================================================================================
+4. SCHÉMA visit — Visites (Payantes)
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1 visit.pricings
+--------------------------------------------------------------------------------
+Rôle : Tarification de la visite (physique ou virtuelle).
+Colonnes :
+  - id              UUID PK
+  - property_id     UUID FK → property.properties(id)
+  - type_id         UUID FK → notarius.types(id)     (PHYSICAL, VIRTUAL)
+  - amount          NUMERIC(15,2)  NOT NULL
+  - duration        INT            (Minutes)
+  - version         INT            NOT NULL
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+4.2 visit.visits
+--------------------------------------------------------------------------------
+Rôle : Réservation d'une visite.
+Colonnes :
+  - id              UUID PK
+  - user_id         UUID           (Agent/Propriétaire)
+  - visitor_id      UUID           (Prospect)
+  - version         INT            NOT NULL
+  - pricing_id      UUID FK → visit.pricings(id)
+  - validity_id     UUID FK → notarius.validities(id)
+  - status_id       UUID FK → notarius.statuses(id)
+
+================================================================================
+5. SCHÉMA lease — Baux et Gestion Locative
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1 lease.leases
+--------------------------------------------------------------------------------
+Rôle : Le contrat de bail.
+Colonnes :
+  - id              UUID PK
+  - user_id         UUID           (Locataire)
+  - pricing_id      UUID FK → property.pricings(id)
+  - version         INT            NOT NULL
+  - terms_id        UUID           (Ref conditions générales)
+  - validity_id     UUID FK → notarius.validities(id)
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+5.2 lease.deposits
+--------------------------------------------------------------------------------
+Rôle : Avances et cautions (calculés via policies).
+Colonnes :
+  - id              UUID PK
+  - lease_id        UUID FK → lease.leases(id)
+  - type_id         UUID FK → notarius.types(id)     (ADVANCES, SECURITY)
+  - balance         NUMERIC(15,2)  (Mois si ADVANCES, montant si SECURITY)
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+5.3 lease.breakdowns
+--------------------------------------------------------------------------------
+Rôle : Échéanciers et factures (liés au module PAY).
+Colonnes :
+  - id              UUID PK
+  - entity_id       UUID FK → notarius.entities(id)
+  - reference_id    UUID           (ID du bail ou de la réparation)
+  - title           VARCHAR(255)
+  - amount          NUMERIC(15,2)  NOT NULL
+  - type_id         UUID FK → notarius.types(id)     (INSTALLMENT, SETTLEMENT)
+  - status_id       UUID FK → notarius.statuses(id)
+  - user_id         UUID           (Destinataire du paiement)
+  - description     TEXT
+
+--------------------------------------------------------------------------------
+5.4 lease.conditions
+--------------------------------------------------------------------------------
+Rôle : États des lieux.
+Colonnes :
+  - id              UUID PK
+  - type_id         UUID FK → notarius.types(id)     (BEFORE_MOVE_IN, AFTER_MOVE_OUT)
+  - lease_id        UUID FK → lease.leases(id)
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+5.5 lease.repairs
+--------------------------------------------------------------------------------
+Rôle : Suivi des réparations liées à l'état des lieux.
+Colonnes :
+  - id              UUID PK
+  - condition_id    UUID FK → lease.conditions(id)
+  - title           VARCHAR(255)
+  - description     TEXT
+  - status_id       UUID FK → notarius.statuses(id)
+
+--------------------------------------------------------------------------------
+5.6 lease.settlements
+--------------------------------------------------------------------------------
+Rôle : Clôture du bail.
+Colonnes :
+  - id              UUID PK
+  - lease_id        UUID FK → lease.leases(id)
+  - deadline        TIMESTAMPTZ    NOT NULL
+
+--------------------------------------------------------------------------------
+5.7 lease.notices
+--------------------------------------------------------------------------------
+Rôle : Préavis de départ.
+Colonnes :
+  - id              UUID FK → lease.leases(id) PK
+  - lease_id        UUID FK → lease.leases(id)
+  - type_id         UUID FK → notarius.types(id)     (LEASE_END, EVICTION)
+  - reason          TEXT
+  - validity_id     UUID FK → notarius.validities(id)
+  
