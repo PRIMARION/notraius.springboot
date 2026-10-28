@@ -1,4 +1,4 @@
-# NOTARIUS — PLAN (fresh rewrite; scope: everything up to and including VISITS)
+# NOTARIUS — PLAN (fresh rewrite; scope: everything up to and including LEASE)
 
 > Written from zero against `DATABASE.txt` **v4.0 (Consolidée)** — the schema
 > authority, read in full, never edited except for the operator-sanctioned
@@ -12,20 +12,23 @@
 
 ## Preamble — what this document is, and the boundary of its scope
 
-This plan covers, in order, and stops at the end of: **types**, **durations**,
+This plan covers, in order: **types**, **durations**,
 the **config module** (rules, policies, amenities), the **asset module**
-(property, pricings, property-level policy values), and the **visits module**
-(the first place money moves). Everything that exists in `DATABASE.txt` beyond
-that line — leases, deposits, breakdowns, conditions, repairs, settlements,
-notices — is deliberately *not* planned here. The schema rows for those things
-may be mentioned when a visit flow brushes against them (a deposit standard is
-*set* in this scope; a deposit is *collected* in the next one), but no
-behaviour, no state machine, no edge-case catalogue is committed for them.
-When the operator says "go further", the next plan picks up exactly where this
-one's last sentence stops.
+(property, pricings, property-level policy values), the **visits module**
+(the first place money moves), and — as of this upgrade — the **lease
+module** (custody measured in months, the second money module), built on
+the lease specification v1.0 (Consolidée) and the operator's rulings from
+the review rounds that followed it. Drafted originally at the end of the
+visits scope; the boundary has since been extended onto the lease, whose
+schema rows in `DATABASE.txt` (leases, deposits, breakdowns, conditions,
+repairs, settlements, notices) are now planned in full as Part 6. The
+schema-level deltas the lease needs (the policies `unit` column, the
+breakdowns `deadline` column, the notices restructure, the pricing
+`requires_conditions` flag) are stated where they bite, but
+`DATABASE.txt` itself is only edited with the operator's approval.
 
-Three grounding sources were read completely before a word of this was
-written:
+Four grounding sources were read completely before a word of this was
+written, and the fourth is new in this upgrade:
 
 **`DATABASE.txt` v4.0** describes five schemas. `notarius` holds the reference
 and configuration layer: entities, types (hierarchical, self-referencing, bound
@@ -43,8 +46,14 @@ property-rule selections (property, rule reference, validity, version) and
 property-amenity holdings (property, amenity, value, status). `visit` holds
 visit pricings (property, physical/virtual type, amount, a plain duration in
 minutes, version, status) and visits (agent/owner user, visitor, version,
-pricing, validity, status). `lease` and its seven tables are out of scope as
-stated above. The general rules at the top of the file bind everything: every
+pricing, validity, status). `lease` holds leases (tenant user, pricing
+reference, terms reference, validity, status), deposits (lease, type,
+balance), breakdowns (amount, type, payment linkage via entity/reference,
+recipient), conditions (lease, move-in/move-out type), repairs (condition,
+title, description), settlements (lease, deadline), and notices (type,
+reason, validity — a many-to-one child of leases, whose own PK and
+`expires_at` column are this plan's schema corrections). The general rules
+at the top of the file bind everything: every
 table has id, timestamps and creator; **versioning happens through
 `notarius.logs` with old and new data**; cross-module links are plain UUIDs
 with no foreign key.
@@ -58,6 +67,18 @@ through one specific door.
 is the source of every business rule below. Where the spec is ambiguous, the
 plan states the ambiguity explicitly and picks a default, marked as a decision
 point for the operator to confirm or overturn during review.
+
+**The lease specification** ("NOTARIUS — Spécification formelle du module
+LEASE", v1.0, Consolidée) plus the operator's informal lease notes govern
+Part 6 wholesale, and the operator's review-round rulings are already folded
+into it — the many-to-one notices, the policies `unit` column, the
+conditions bypass that never touches settlement, the dispute-recalculation
+doctrine, the property LEASED/DISABLED interlock, and the born-allocated
+split matrix. The money's infrastructure changes live in PAY's own plan
+(`pay/PLAN.md`, written as this document's companion): this plan treats pay
+as the estate's money law and drives its lease money exclusively through
+the internal server-to-server routes, per the fence every notraius flow
+respects — no user ever touches a payment whose platform is not pay's own.
 
 ---
 
@@ -559,6 +580,15 @@ around, treated fully in Part 4's policy-values section: **a policy for Benin
 can differ from a policy in Nigeria**, and the state on the policy is how the
 system knows which world a standard belongs to.
 
+One more column joins in this upgrade, and it changes how the value is
+**read**, not what it bounds: the policy carries its own `unit` — UNITS or
+AMOUNT — which declares whether the value means *n units of the bound
+pricing's duration* or *a raw amount of money in the property's currency*.
+The lease module and its deposit machinery live entirely on this column
+(its consequences are developed in Part 4.3 and Part 6); the asset module's
+value-setting UI quotes it, the validation compares in it, and the notice
+engine's grace arithmetic converts through it.
+
 ### Enable, disable, mandatory — and what each does to the world
 
 **Disable** is the admin's pause button: the standard stops being offered
@@ -843,9 +873,10 @@ unpublish (their own pause) and republish; staff may suspend for moderation
 anything: pricings, amenities, rules, values and attachments all persist,
 and visits already requested keep their own lifecycle (Part 5 handles what
 happens to a visit whose property went dark). Deletion is refused while a
-live visit references the property — the same in-use discipline as rules —
-and is otherwise a soft removal that detaches media and retires references
-rather than breaking them.
+live visit references the property, and — since Part 6 — while a live
+lease holds it, the same in-use discipline as rules — and is otherwise a
+soft removal that detaches media and retires references rather than
+breaking them.
 
 ### Strange cases — property
 
@@ -923,11 +954,12 @@ answerable.
 A pricing may be created, edited, paused (its window closed or its row
 disabled — the owner's choice) and removed. Removal is refused while a live
 reference depends on it — within this scope, a policy value row points at a
-pricing, so removing a pricing that has policy values attached either
-refuses or takes the values with it; the plan refuses, because the values
+pricing, so removing a pricing that has policy values refuses or takes the values with it; the plan refuses, because the values
 are the property's deposit story and destroying them to delete a price is the
-wrong trade. The out-of-scope lease module will add a second, stronger
-in-use reference later; the discipline is already the same.
+wrong trade. And the lease module of Part 6 adds a second, stronger in-use
+reference — a pricing a lease has been created from cannot be removed while
+that lease lives — the discipline is already the same, and the lease only
+makes it heavier.
 
 ### Strange cases — pricings
 
@@ -981,17 +1013,38 @@ electricity deposit? We still set it" — the mechanism does not care which
 kind it is; the admin's policy defines the standard, the owner's value
 defines the instance.
 
-### Units: how a number knows what it means
+### Units: how a number knows what it means — the policy's own `unit` column
 
-A value of 4 means four months because its policy is an ADVANCE standard and
-its pricing is monthly; a value of 150,000 means an amount because its
-policy is a SECURITY standard. The unit interpretation descends from the
-policy's own type and code — the admin, who defines the standard, is the one
-who has implicitly defined what counting means for it — and the pricing's
-type supplies the multiplier for count-kind standards. The plan does not add
-a unit column or a conversion table: the semantics live where the
-specification put them, in the admin's definition, read consistently by the
-deposit module later.
+The operator's ruling makes the unit explicit instead of interpretive: a
+policy carries a **`unit` column holding either UNITS or AMOUNT**, and that
+one word is how the system reads the value everywhere. A value of 4 under
+`unit = UNITS` means **four units of the bound pricing's duration** — four
+months on a monthly pricing, four nights on a nightly one, four weeks
+elsewhere, the durations catalogue doing the calendar conversion so no
+extra column is ever needed. A value of 150,000 under `unit = AMOUNT` means
+**the raw money figure itself**, in the property's currency. ADVANCE and
+ELECTRICITY can be typed either way per state, which is exactly the
+dynamic the specification wanted: Benin's ADVANCE can be UNITS valued 3
+while Nigeria's is AMOUNT valued 200,000, same policy code, same chain,
+different *kind* of standard — and the state-scoped resolution of Part 4.3
+keeps them from ever colliding.
+
+Three consequences get decided by this one column. **Validation** reads the
+unit first: min and max compare in the policy's own unit, refusing loudly
+when the unit is missing rather than guessing. **The grace arithmetic** of
+the lease's notices (value × 2) resolves through the same chain — units
+convert to days and months via the pricing's duration row — so the notice
+cron's math stays unit-agnostic. And **the deposit's two truths** stay
+honest (Part 6): the balance counts in the policy's unit, while the
+*frozen amount in currency* — units × the rent at the lease's pricing
+version — is computed at lease birth and never re-derived, because escrow
+funding needs a money number and rent re-versions later must not silently
+reprice custody someone already funded. Two shadows planned loudly: a
+policy whose unit flips is refused while any live deposit binds to it (the
+same reinterpret-crime the amenity data type immutability prevents — the
+change is a versioned, flagged migration otherwise); and a UNITS-typed
+deposit's computed rounding is one conversion act at birth, logged, so no
+later arithmetic ever rediscovers its own fractions.
 
 ### State scoping: Benin versus Nigeria, and the bulk copy
 
@@ -1091,12 +1144,15 @@ it settles it, refunds it, splits it, through internal routes; pay's generic
 user-facing routes refuse it by design, with no admin override. The stamp is
 also the proof-of-ownership link the specification points at: the payment
 carries a platform identifier, and reading it back tells notraius that the
-entity reference on this payment — **the identifier of the VISITS entity
-row in the registry** — belongs to notraius's own namespace. The addressing
-is therefore: entity id = the VISITS entity (proving *whose* namespace this
-is), reference id = *this particular visit* (proving *which* record it pays
-for), and the platform stamp is what lets notraius trust the first half
-without asking anyone.
+entity reference on this payment — **the identifier of this particular
+visit** — belongs to notraius's own namespace **because the platform stamp
+says whose metadata of reference ids this is**. The addressing rule (the
+operator's ruling, adopted into pay as well) is: no entity rows are ever
+seeded into pay's catalog for host domains; a split's address lands as the
+canonical (EXTERNAL, reference) cross-service pair — *which record it pays
+for* — and the platform stamp is what answers "whose reference vocabulary
+did this id come from", resolving inside notraius's own entities registry
+and never needing pay to know the word VISITS.
 
 The parties are three, and the specification is adamant about which one money
 ultimately belongs to: the **visitor** (the prospect who requests and pays),
@@ -1116,10 +1172,14 @@ and **requests a visit: paying automatically**. There is no "request then
 invoice then chase" loop: the request *is* the payment event. One transaction
 of business intent creates the visit row in its initial requested state and
 the payment for it — the payment's amount is the visit pricing's amount in
-the property's currency, its reference is the visit, its entity is VISITS,
-its platform is notraius — and the money lands **held**, not released: the
-escrow split that names the destination exists from birth, but nothing moves
-to anyone until the visit completes or cancels.
+the property's currency, its reference is the visit, addressed through the
+canonical (EXTERNAL, reference) pair exactly as the no-seeding law of 5.0
+declares, its platform is notraius — and the money lands **held**, not released: the escrow split exists
+from birth — the envelope carved and held — while its **destination is
+announced later**: visits ride pay's legacy settle lane (one funding, one
+settle announcing destinations), so the release credits whoever the
+settle act names, and nothing moves to anyone until the visit completes
+or cancels.
 
 The payment's deduplication key is (reference, currency) on pay's side and
 the absence of an idempotency key on the internal route means **the
@@ -1130,10 +1190,29 @@ real strange case — a visit whose payment was refunded (cancellation,
 below) and whose visitor *requests again*: the old, dead payment no longer
 shadows a fresh charge, and the new request funds itself properly.
 
-If the payment attempt fails, the visit does not half-exist: the request
-rolls back (or is created in a clearly unpaid state that the sweep expires) —
-a visit nobody paid for is never left waiting on an owner's desk as if it
-were real. The owner sees nothing until the money is held.
+If the payment attempt fails, the visit does not half-exist — and
+*which* failure decides the shape. A **refusal** (pay answered no:
+validation, insufficient funds) rolls the request back — a visit nobody
+paid for is never left waiting on an owner's desk as if it were real. An
+**unknown** (the call timed out, the connection severed) rolls nothing
+back, because rolling back on an unknown can strand money pay has
+actually taken: the visit row stands in its clearly unpaid state, and
+the sweep's re-read of the payment's truth settles it — funded, the
+request completes; *definitively* unfunded — a standing PENDING
+collection is neither answer, the sweep leaving the row for the next
+round (pay's own expiry is what writes the dead word that makes
+"unfunded" definitive) — the sweep expires it. Both shapes
+rest on one discipline: **the visit's reference is minted and persisted
+before the funding call leaves** — which is also what makes the
+double-click protection honest, both clicks carrying the same
+already-persisted reference, the dedupe converging them whether or not
+the first call ever answered. The owner sees nothing until the money is
+held. And the sweep
+that expires the unpaid shape re-reads the payment's truth before it ends
+a visit: a visit whose money stands funded in custody is not "unpaid" —
+the cross-service saga's orphan (pay committed, this side's commit
+failed) is found and adopted by the retried request through the reference
+dedupe, never expired out from under its own funding.
 
 ### Strange cases — request
 
@@ -1244,9 +1323,12 @@ gate is symmetric, so neither side can rush the other by confirming early.
 
 When both assessments exist and someone presses confirm, the visit completes
 and **the money moves from escrow to the owner of the property — not the
-user id on the visit, the owner's account on the property**. One settle, one
-destination, the full held amount: the split that was declared at birth is
-released to the property owner's user. The visit's status becomes completed,
+user id on the visit, the owner's account on the property**. One settle, one destination, the full held amount: the settle act names
+the property's owner at the settle moment (the flagged default,
+decision point 4 — the property is what was paid for) and pay's release
+credits exactly that name, because the visit's split was born *held* —
+its destination is the settle act's announcement, never a live owner
+lookup by pay. The visit's status becomes completed,
 the payment becomes settled, and — because pay never allows a refund after
 settle — this is a one-way door: everything below (cancellation) is
 therefore only thinkable *before* this moment, which the state machine
@@ -1295,8 +1377,8 @@ the admin rather than being auto-resolved.
 The specification's final scenario — things going awry — has two named
 instruments and one money rule.
 
-**Reschedule management** exists inside CONFIRMED: while the visit is still
-far enough away, either party may request a new time, and the visit
+**Reschedule management** exists inside CONFIRMED: either party may request
+a new time, and the visit
 re-enters the PLANNING stage with the identical turn rule (last editor's
 counterpart confirms or counters) — confirmed visits do not get a second,
 simpler editing mechanic; they get the same referee. A reschedule that
@@ -1327,8 +1409,8 @@ the visit for a replacement booking to be plausible, so the visit proceeds
 or goes to dispute (the support ticket, below). The exact boundary instant
 compares the visit's planned start against now, in absolute time, so "24
 hours before" is a moment on the calendar, not a business-day approximation;
-a visit exactly 24 hours away is still cancellable (at-least, not
-inside-than).
+a visit exactly 24 hours away is still cancellable — the door shuts the
+first second inside that line.
 
 **The money split on cancellation**: the held payment is settled with two
 destinations — **80% back to the visitor, 20% to the property owner** — the
@@ -1361,7 +1443,7 @@ routes), score 1 across every axis, attributed to the counterparty, and it
 counts toward the cancelling party's standing exactly like any other
 assessment. Nothing gates on it: it is a consequence, not a step — the
 cancel completes whether or not anyone later disputes the fairness of the
-review, and disputes about *that are* what the support ticket (§5.5) is
+review, and disputes about *that* are what the support ticket (§5.5) is
 for.
 
 **Reschedule, once more, because the contrast is the point**: none of the
@@ -1484,7 +1566,882 @@ implements.
 
 ---
 
-# Part 6 — Cross-cutting laws (the sentences every module obeys)
+# Part 6 — The lease module: custody measured in months, and the machine that watches over it
+
+## 6.0 The frame: one pricing to bind them all, born-allocated money, and the property's states
+
+Lease is the visits plan's doctrine held over *time* rather than hours: the
+money is born held and its fate is decided not once but repeatedly, over
+months and years, by rules that must stay exact because lives are lived
+inside them. The module's single most load-bearing decision is the one the
+schema already makes: **the lease binds to a pricing, not to a property**.
+From `pricing_id` the lease derives everything at birth — the commercial
+cadence and its duration row (a month, a night, ten hours), the rent
+amount, the currency (the property's, inherited, never re-stated),
+`requires_conditions`, and through the property and its location the state
+that selects the whole policy chain scoping the deposits. Nothing in the
+lease creation flow needs a settings screen, and the hotel case falls out
+for free: a nightly pricing with no monthly policy chain and no move-in
+conditions *is* a hotel stay, served by the same machine with different
+data, never by a second machine.
+
+**The money is born-allocated and release-on-demand** — the operator's
+ruling, shaped here as the module's financial law. At lease creation there
+is exactly one funding event: a single payment whose *entire deposit
+matrix* is born with it — one split per month of advance (every split
+addressed to the property owner, each with its own `(EXTERNAL, reference)`
+address, the month being its own reference so pay analytics reconciles per
+month). One hull note before it hardens into law: an ADVANCE priced as an
+**AMOUNT** is the same matrix with one fewer carving — its advance custody
+is a single gross split carrying the whole figure, its consumption walking
+pay's partial release (the reading is fixed in 6.4). One split per other
+deposit kind (SECURITY, ELECTRICITY — gross
+amounts, one split per type), and one held escrow over every split. The
+owner's wallet is credited nothing; the money sits in custody. From that
+moment the matrix never changes and nothing is ever carved late: the
+lease's financial life is a decided sequence of *which* escrow to release,
+*when* — a month of consumed advance released to the owner as rent here, a
+deposit returned to the tenant at settlement there — and the whole parked
+sum always reconciles to some combination of escrow states. Pay-side, this
+law already has a name: pay's per-split custody evolution (its own plan)
+carries the matrix create, the per-split release, the split-aware refund,
+and the funding word. Notraius drives all of it through the internal
+server-to-server routes, never through a user-facing pay route, exactly
+the fence the visits money already lives behind.
+
+**The property's states interlock with the lease's existence, per the
+operator's ruling.** Only an **ACTIVE** property can receive visits and
+take on new leases; the moment a lease *exists*, the property becomes
+**LEASED** — no second tenant can race for the same asset, and while a
+lease lives the property takes no viewings either, because it is not the
+next lease's subject while it is someone's home. Visits already in flight
+when the flip lands — requested, planning, confirmed — walk the
+owner-fault door of Part 5.4: the property cannot host what a tenancy now
+occupies, so the visitor's money returns in full, no 24-hour line, and no
+assessment is filed against anyone for a platform-state change. The
+owner's unpublish door, for the same reason, is refused while the
+property is LEASED — a tenancy is the listing's living truth, and the
+pause button is for market-facing states, not for someone's home. When a lease **COMPLETES**
+the property passes to **DISABLED** — deliberately dark, because a vacated
+place needs cleaning, repairs, an owner's eyes — and returns to
+**ACTIVE** only when its owner clicks the explicit "make it available"
+gesture. A **CANCELLED** lease hands the property back to whatever it was
+before it at once — its whole matrix returned, nothing half-held. An
+**EXPIRED** one does not: the lease whose validity ran out still has a
+settlement to walk (6.7), and until that settlement resolves the property
+stays dark — no new tenant races in underneath a holdover occupant and
+unresolved custody. Two tenants, one property, zero races, including the
+expiry-shaped one. And CANCELLED itself is scoped by the same logic: it
+is the pre-commitment word — PENDING exits and the import's refusal —
+never a mid-life exit; a lease that has been confirmed or has lived has
+no whole matrix left to return, and it ends through the settlement's
+door (6.7), never by cancellation, because a cancellation that skipped
+the settlement would dodge the very debts and repairs the settlement
+exists to price.
+
+The statuses themselves — PENDING, CONFIRMED, ACTIVE, COMPLETED,
+CANCELLED, EXPIRED, DISPUTED for the lease; DRAFT, ACTIVE, LEASED, DISABLED
+for the property — are **seeder concerns** (the operator's ruling): the
+schema stays as `DATABASE.txt` declares it, and the words land with the
+rest of the status vocabularies when the modules are built.
+
+One guard declaration the lease makes for itself, the visits module's twin:
+**non-subscription**. No plan feature is ever bound to the lease activity
+family, so the subscription guard's empty-binding escape keeps leases free
+of plan quotas forever — a tenancy is not a bulk operation, and counting
+them against a plan would tax the act of living somewhere. Rate limits
+remain available as always (a rule row is the admin's ordinary throttle),
+and the permission rows and authority expressions apply unchanged —
+non-subscription means the *quota* dimension is deliberately empty, never
+that the module is unguarded.
+
+## 6.1 Birth: the tenant creates, the policy chain prices the deposits, and the matrix is funded
+
+The tenant — signed in, **KYC-verified through the identity host's own
+truth** (the same door every property creator passed; the registry already
+declares the verification routes), property ACTIVE and published — creates
+a lease by choosing the property and a pricing; the lease row is born
+PENDING because *neither party is ready yet*, and the verification is
+re-read at the landlord's confirmation — the moment the commitment becomes
+real, because rent-scale money never moves under an identity that has
+lapsed; a failed re-read refuses the confirmation, and the staleness
+window's expiry (below) is what returns the already-funded matrix to the
+tenant. What the specification calls the automatic
+part happens before the first screen finishes loading: the system reads the
+pricing's policy chain — resolved through the property's state, exactly the
+Benin-versus-Nigeria resolution of Part 4.3 — and **derives the entire
+deposit standard**: ADVANCE with its unit (UNITS: value months-of-this-
+pricing; AMOUNT: a fixed figure), and each other policy (SECURITY,
+ELECTRICITY, and whatever else the admin has declared — the mandatory ones
+enforced at birth exactly as the publishing gate enforces them at
+publication). The `unit` column is what
+makes this dynamic rather than interpretive: the same policy code prices a
+long lease in Benin and a serviced apartment in Lagos *correctly*, each in
+its own kind of quantity, with no bespoke screen.
+
+Then the matrix is funded in one event: the total — computed as the frozen
+amounts (units × the rent *at this pricing's version*, for UNITS policies;
+the value itself, for AMOUNT ones) — becomes one payment for the lease,
+splits per deposit kind and per advance month as set out in 6.0, escrows
+all HELD, the money leaves the tenant's wallet exactly once. The **frozen
+amounts are frozen here, in the payment's actual money, and never
+re-derived**: if the pricing is re-versioned mid-life, rent history stays
+true, deposit custody stays true, and every future calculation reads the
+amount as funded, not re-multiplied against a changed world. The refund
+that mirrors this is clean and total: the landlord may cancel the lease
+while it is still PENDING — no commitment has been made, no conditions
+have been taken, and the whole matrix returns to the tenant, escrow by
+held escrow, in one refund act. A lease whose money failed to fund is not
+half-born: the request rolls back and the property never leaves
+ACTIVE.
+
+The payment's reference is the lease id and its dedupe is the (reference,
+currency) law — so a retried creation finds the existing funding instead
+of charging twice; the *top-ups* that later replenish consumed advance
+months deliberately do **not** reference the lease, they carry their own
+per-event references (Part 6.3), because one business event is one
+reference or the dedupe law will silently hand back the live funding.
+
+And because the funding crosses a service boundary, the birth is a **saga
+with a written compensation law**. The first transaction takes the lease
+row (PENDING) and the property's flip to LEASED together; only then does
+the funding call go out to pay. If pay refuses — validation, insufficient
+funds — the compensation is immediate and total: the PENDING lease ends,
+the property returns to ACTIVE, and nothing half-exists. If pay *commits*
+and this side's own commit then fails, the funded payment stands as an
+orphan until the retried creation finds it by its reference — the dedupe
+**adopts the orphan** (pay's own law) instead of charging the tenant
+again — and the adoption is not blind: the retried birth re-reads the
+standing matrix against the deposit standard it is about to serve, and a
+mismatch refuses loudly for a human to reconcile rather than carrying
+custody priced by a superseded figure. And the third shape — **the call
+that never answers** (pay unreachable, the connection severed mid-flight,
+the outcome genuinely unknown) — is the shape compensation may never
+touch blind: before anything is undone, this side *asks pay for the
+reference's truth*, and the reference is the query key pay answers by.
+Funded, the answer is adopted and the birth completes; definitively
+unfunded — a refusal, an answer — the compensation runs; unanswerable,
+the lease stands PENDING with its intent persisted and nothing is
+undone — the retry, or the staleness sweep, asks again. And the
+in-between answer gets its own name, because it is the one that splits
+brains: **"still collecting"** — a PENDING row pay is mid-committing —
+is neither funded nor unfunded; it is the unknown wearing a name, and it
+is answered by asking again, never by compensating, because a
+compensation that races a commit which later lands is the stranded
+money all over again. This is the
+module's general funding law and it binds every intent that ever crosses
+the boundary — the visit request (5.1), the installment payment and the
+top-up (6.3) no less than the birth matrix: **the reference is persisted
+before the call leaves, and a rollback ever answers a refusal, never an
+unknown** — compensating on an unknown is how money pay actually took
+vanishes on paper while standing in custody in fact. Every *settled*
+shape ends in one of two worlds — the lease never existed, or the
+funding is found and the birth completes — and the unsettled one is a
+lease that stands PENDING asking again; never a world where money left
+and nothing stands behind it.
+
+### Strange cases — birth
+
+**The pricing re-versions between the tenant seeing the numbers and
+pressing pay**: the matrix is funded against the version that priced it at
+the instant of funding — the displayed deposit is the funded deposit, and
+if the version moved the display refreshes before the one-click confirm.
+**Idempotent double-clicks**: the dedupe returns the funded payment; no
+double matrix, no double debit. **A mandatory policy's standard missing
+for the state**: the lease refuses with the named policy — fail closed,
+never an unbounded amount. **The property flips LEASED the moment the
+lease exists**: a second creation attempt on the same property is refused
+by the property's own status, not by lease-table spelunking.
+**The tenant cancels their own PENDING lease** (wrong property, plans
+changed): the same clean total refund the landlord-side cancel enjoys — no
+commitment had been made, the whole matrix returns escrow by escrow, and
+the property returns to ACTIVE the same instant. A PENDING lease's money
+sits in custody only while two people are considering; one of them walking
+away can never strand it. **A PENDING lease the landlord never confirms**
+cannot hold the matrix forever: after a configuration-bounded staleness
+window the machine ends the lease EXPIRED and refunds the tenant's matrix
+in full inside the same transaction — the visits module's own elder law,
+*silence never keeps money*, binding the lease at its first gate too. The
+window is a deployment setting; the law is not. **The landlord cancels
+while the birth saga is mid-flight** (funding sent, outcome unknown):
+the cancel refuses until the saga resolves — funded, the cancel proceeds
+and the whole matrix returns; refused, it lands on a lease that already
+ended — because a refund act against custody that does not exist yet
+would strand the money the moment it arrived. **The staleness expiry
+obeys the same law**, being the machine's own cancel: mid-flight it
+waits and *asks the reference's truth* — an answer of still-collecting
+or of silence is never an expiry trigger; resolved-funded, the lease
+stands funded and the window's clock runs from the resolution (the
+landlord's silence is chased from there, ending in the same refund);
+resolved-refused, nothing ever moved and the expiry is clean.
+
+## 6.2 PENDING → CONFIRMED → ACTIVE, and the conditions stage the boolean commands
+
+The owner confirms the lease and thereby *stamps their commitment* — the
+machine's second checkpoint — and the lease enters CONFIRMED. The meaning
+of the word is fixed by the operator's ruling: **CONFIRMED means committed
+and awaiting the move-in conditions** to be created and confirmed. When
+`requires_conditions` on the bound pricing is TRUE, that stage is real:
+the tenant takes the move-in condition reports — the photographs and the
+enumerated state of the premises (the `BEFORE_MOVE_IN` rows of the
+conditions) — attaches them while the lease is not yet ACTIVE, and the
+landlord confirms them, "yes, those really were the things". The
+confirmation of the conditions *is* what parks the lease into ACTIVE, and
+the versioned log trail of those documents is the evidence the
+end-of-life's adjudications will stand on.
+
+When the boolean is FALSE, the ruling is explicit and the machine obeys
+it bluntly: **conditions and repairs are bypassed completely — but
+settlement is not.** The lease runs CONFIRMED → ACTIVE with no condition
+rows, no move-in documents, no move-out negotiations, no repair ledger —
+and its end of life still runs the settlement stage (Part 6.7), because
+the settlement is where custody resolves and custody exists regardless of
+how few photographs the relationship produced. The bypass removes
+*bureaucracy*, never *money truth*.
+
+With ACTIVE, the validity window governs the machine, and the
+**installments** are generated: a breakdown row per period of the lease's
+cadence, carrying its amount (the rent at funding-time truth), its
+**deadline** (the schema column this plan corrects into `DATABASE.txt` §5.3's
+breakdowns — the OVERDUE status is late without it), its type (INSTALLMENT for rent, with the
+other types for electricity and whatever else the cadence bills), and its
+recipient (the `user_id` column naming who is paid). The breakdowns are
+the lease's calendar made real: every money moment in the lease's life
+that will ever be owed, scheduled from the validity and the duration
+chain, versioned and logged like everything else. And an open-ended
+validity cannot schedule an infinity: the calendar generates on a
+**rolling horizon** — a bounded window of future periods, extended as the
+machine walks forward, each extension a logged act — and every fresh
+generation names its recipients from the property's owner field *at that
+generation* (6.4's deed law: new money, new truth), while the reel, the
+stamp and the expiry walk read the horizon the window currently holds.
+
+### Strange cases — the staged machine
+
+**The tenant uploads conditions, the landlord stalls**: CONFIRMED holds,
+no installments bill yet (ACTIVE has not begun), and the notice engine of
+6.5 is not the tool here — a stalled *stage*, not a stalled payment, is a
+support-ticket matter, and the DISPUTED doctrine (6.7) reaches it like
+every other stage. **The landlord confirms but the calendar's first due
+date has already slipped by** (a mid-month start, a cadence aligned to the
+first of the month): the machine never schedules a deadline in the past —
+a breakdown that would be born overdue is born **due now** instead, the
+partial period folded into the first full deadline; overdue-on-birth would
+drain custody before anyone lived one hour of the tenancy. And the mirror
+law at the other end: **a period that would outlive the validity is never
+born** — the schedule is generated from the validity, so the calendar
+cannot bill time the tenancy was never granted; a truncation's cut-away
+periods are the reel's own arithmetic (6.5), unearned rent only where
+money had already moved. The calendar
+stays honest — due-now at birth is stated on the row and in the logs —
+but what a breakdown may never be is already-late. **The deadline that
+would land on a day the month does not have** (a start on the 29th,
+30th, 31st): the calendar repeats the start's day-of-month and **clamps
+to the short month's last day** — the 31st starts a February on the
+28th, an April on the 30th — the anniversary reading every calendar
+library already speaks; what it never does is **drift** the remainder
+forward until the date wanders, because a drifting deadline silently
+moves the tenant's rent day and the assessment's clock with it, and
+nobody agreed to that. **And the deadline's instant is one law**: a
+deadline is a date, and "passed" means the deployment's single declared
+clock has rolled that date over — the vigil, the sweep, the payment
+route and the notice engine all reading the same rollover, Benin and
+Nigeria alike — never a wall-clock intuition and never whichever
+service's clock happened to answer, or two half-truths of "late" would
+walk the same lease. **A hotel lease** (boolean FALSE): PENDING
+→ CONFIRMED → ACTIVE in two gestures, installments at the nightly or
+hourly cadence, and the end of life is a degenerate settlement (6.7).
+
+## 6.3 The monthly money cycle: pay what is due, consume what is parked, restore what was consumed
+
+Each installment falls due. The ordinary path is ordinary: the tenant pays,
+a new payment rides the breakdown's own reference with a direct split to
+the owner (the breakdown's `user_id` names the recipient), the breakdown
+becomes SETTLED, the logs record the lot. The cash path lives here too
+(Part 6.8): a payment stamped flow-EXTERNAL, the receiver attaching the
+receipt and confirming as PAID — never for deposits, only for what is
+billed, per the guard's absolute rule.
+
+The interesting path is the **overdue consumption**, and the operator's
+description of it is precise: when an installment's deadline passes
+without payment, and the ADVANCE balance still covers at least one
+period, the machine settles that rent *from custody* — the escrow over
+that month's advance split is **released**, the owner's wallet receives
+it, the breakdown's status becomes **DEPOSITED**, and the breakdown
+stores the released escrow's own identity (its entity/reference pair) as
+the ledger thread tying "this rent" to "this custody". Consumption is a
+law, not a discretionary favour: the vigil's next hourly read after the
+deadline is what performs it, so no one can play a waiting game with the
+landlord's cash flow. And consumption has an order it never revisits:
+**FIFO over the still-HELD advance escrows** — the oldest held month
+releases first, whichever funding act carried it, the birth matrix or a
+later top-up — so no interpretation can ever float *which* month was
+consumed; the breakdown's stored escrow identity names that exact escrow,
+and any later reading reconstructs the consumption line by line. The
+advance balance **drops by one**, its row updated inside the release's
+transaction, versioned and logged. The tenant then **restores** the
+balance deliberately: a top-up payment — their own reference, one split
+per month restored, new escrows HELD — climbs the balance back (one
+payment may restore two months or such, its splits per advance — exactly
+the operator's shape), and the
+module's arithmetic never loses a period: consumed minus restored, exact,
+per month. And the top-up obeys the birth's funding discipline like
+every intent that crosses the boundary: its reference — the top-up
+event's own, never the lease's — is persisted *before* the call leaves,
+so a retried top-up finds its funding by its own reference instead of
+double-charging, and an answer that never arrives is an ask that
+repeats, never a compensation guessed in the dark. A top-up may **overshoot the standard** — the money is real
+custody and nothing refuses a tenant who parks more than the minimum; what
+the standard governs is the *grace's satisfaction* (the notice's demand is
+met the instant the balance reaches the standard) and the machine's
+silence — the module chases a tenant for having no cushion, never for
+having extra. When the balance's trail reaches **one period left**, the
+module stops being quiet: the DEPOSIT notice fires (Part 6.5), because
+the cushion that protects both parties from the next miss is nearly
+spent.
+
+**And the miss files its own judgment: the auto-assessment.** Every
+installment-class breakdown the tenant is billed — rent, electricity,
+whatever the cadence bills — carries an assessment slot of its own, and
+the slot fills itself the moment the deadline passes without the tenant's
+payment: the machine files, automatically and inside the same transaction
+as the resolution act, an **assessment scored 1 on every axis against the
+tenant** — the visit module's cancel penalty, generalized to rent.
+Whether the machine then satisfies the miss from custody (the breakdown
+DEPOSITED) or leaves it marked OVERDUE, the judgment is identical,
+because the breach is identical: the deadline passed and the tenant did
+not pay. The record is bound to the installment — *which* month was
+missed is on the assessment's face — it is filed on behalf of the
+recipient party, it is a consequence and not a step (nothing gates on
+it, and paying late does not retract it), and the fairness question
+travels the ticket door exactly as every visit assessment's does. One
+installment, one assessment: a breakdown is never judged twice for the
+same miss; a *different* month's miss files its own.
+
+### Strange cases — the cycle
+
+**One payment, several missed months**: the formal spec's default clears
+each installment as its own payment, and the machine keeps that default;
+but where a payer consolidates money-side, a payment covering several
+months is legal under the re-keyed uniqueness (pay's plan, Part 4) *provided* its splits carry each period its own address —
+each breakdown then settles from its own split, the exact-sum law holds
+per payment, the calendar clears per period either way. And the
+consolidation settles money, not judgment: every missed month in the pile
+already filed its own assessment at its own miss — paying late clears the
+balance, never the record. **The settling payment is refunded, or its
+cash claim annulled**: neither is a self-serve act — a refund against a
+settled breakdown travels the ticket, and the admin's grant (or the
+confirmation's annulment, 6.8) re-opens the breakdown in the same
+transaction, returning it to unpaid; the ordinary laws then re-run over
+it — overdue and its assessment included where the deadline has passed,
+because the machine's trigger is the deadline passing without payment
+*held*, not the story of why — and the logs carry the whole chain
+(payment, refund or annulment, re-opening), so the human who caused the
+consequence sees it. Money history stays append-only; the row's truth
+follows the money. **The installment payment's own saga** (created here,
+settled across the boundary): a retried creation is adopted by the
+dedupe, and a retried settle finds the payment already SETTLED and is an
+audited no-op — the breakdown's status check makes the second pass a
+skip, the same convergence every cross-service act in this module
+carries. **The whole-row law**: each split of an installment payment
+names its breakdown's due figure exactly — a figure above or below it
+refuses loudly on the wallet path, because the calendar has no
+half-settled rows and no credit ledger; money meant for the cushion rides
+a top-up reference, never an overpaid installment. The cash path records
+what physically happened — a short cash payment is a recorded fact, not a
+settled row: only a claim that completes the due figure settles the
+breakdown, and a shortfall's fairness is ticket territory.
+**Overdue with no balance left to consume**: the breakdown goes OVERDUE
+with no escrow to release — no silent debt-financing; an OVERDUE row with
+nowhere to draw is a support-ticket matter, and the admin's tools decide,
+because manufacturing a hypothetical advance to bill against is exactly
+the quiet money creation the module refuses. **The owner's wallet
+refuses the credit**: the release act is fail-closed on destinations
+(pay's law), so a consumption whose beneficiary's wallet cannot be
+resolved refuses whole — custody stays HELD, nothing half-moves — and
+the breakdown goes OVERDUE with its escrow still standing, which is a
+reconciliation matter for a human (the owner must present a creditable
+wallet), while the vigil keeps retrying on later rounds: the act is
+re-runnable, and the moment the wallet answers, the oldest HELD escrow
+releases exactly as the deadline originally commanded. **The owner's wallet and
+the released escrow race** (two months consumed in the same instant):
+the release route's pessimistic lock order (payment then escrow, per
+pay's own canon) serializes the pair; each month releases once.
+**The vigil's consumption races the tenant's own payment** on one
+breakdown: the breakdown's resolution is one act, serialized by its
+status inside the transaction — a payment that lands first settles the
+breakdown and the vigil's read finds nothing left to consume; a
+consumption that lands first leaves the breakdown DEPOSITED, and the
+late payment is refused loudly, its money returning whole (a fresh
+payment, nothing ever released on it) — never a double settle, never a
+double collect.
+**Currency**: every amount in the lease is the property's currency
+inherited at birth; the payment rows carry the same currency; the 6dp
+conversion law at pay's border applies once per funding act and once per
+settlement act, never per period.
+
+## 6.4 The deposit rows and their two truths
+
+A deposit row carries the lease, its policy-bank type, its balance and
+its status — and the ruling's arithmetic is this: the **balance is the
+counter in the policy's unit** (months of advance, for the UNITS kind),
+while the **amount is frozen at birth** and is the only figure the
+money-machinery ever reads. The reason is adversarial in origin: rents
+re-version; deposit custody does not re-price. The tenant paid for four
+of *these* months at this rent; the next landlord raise does not quietly
+multiply whatever sits in escrow. Every display translates from the
+counter; every movement uses the frozen figure; the logs hold the
+divergence so the operator can always find out what the balance said and
+what the money was on any past day. And the frozen figure's only home is
+the born payment's own money — the escrow sums — never a second price
+column that could drift from custody: the schema's balance column carries
+the counter, and the money lives in exactly one place.
+
+**The AMOUNT-typed advance gets the same honesty in a different hull.**
+Its custody is one gross escrow over its whole frozen figure, not one
+escrow per month, and its balance counter is the number of whole
+month-equivalents that figure covers at birth — the frozen amount divided
+by the frozen month rent, floored, computed once, logged, and never
+re-divided however the rent later re-versions. Consumption walks that
+custody with pay's partial release (pay's plan carries the exact shape):
+each consumed period releases exactly one frozen month's rent from the
+gross escrow, the remainder stays HELD while it is positive, the counter
+drops by one, and the breakdown's stored escrow identity lands exactly as
+in the per-month case. When the remainder can no longer cover a whole
+month, the escrow sits until settlement — the machine never releases a
+month it cannot name exactly. **The other deposits never release
+along the way**: SECURITY and ELECTRICITY escrows stay HELD for the
+lease's whole life, whatever else happens — their money's only exits are
+the settlement (return to tenant, 100%) or the disputes' adjudication.
+They are the lease's collateral, and collateral is not cash flow.
+
+**And born custody does not follow the deed.** The property's owner field
+can change mid-life; the matrix's beneficiaries cannot — they were frozen
+at birth (pay's law: the matrix never changes) — so consumption releases
+and every escrow-borne movement keep crediting the wallets custody was
+born with, whatever the deed says today, and the transfer's economics are
+the parties' private affair. The owner field governs *new* money only —
+fresh payments, the settlement's created debts — never the custody
+already standing. The visits module rides the same discipline, not the
+exception to it: a visit's *destination* is announced at settle time
+(the legacy lane's settle-announces-destinations), while a lease
+releases custody *born months or years earlier* with its beneficiaries
+frozen at birth — two lanes of pay, one discipline each.
+
+## 6.5 The notice engine: DEPOSIT, VACATION, RECONVERSION, and the vigile
+
+The notices are the lease's immune system — each one a small state
+machine living inside the lease's machine, driven by the cron the
+specification calls the vigil (hourly, reading `expires_at`, forcing the
+transitions silence cannot argue with). The schema correction this plan
+makes them legible: an own primary key (not the lease id — a lease
+spawns a parade of notices across its life, so **many-to-one** per the
+ruling), the lease foreign key, the type, the reason, the issued instant,
+the response field (so 72-hour *silence* is distinguishable from an
+explicit refusal — the cron acts on silence, the humans audit the
+refusals), and `expires_at` as the clock the vigil reads.
+
+**The DEPOSIT notice.** Triggered the moment the ADVANCE balance
+*reaches* one period — by descent or by birth: a lease born with a
+one-period cushion, or an AMOUNT hull whose frozen figure covers no whole
+month (its counter born zero), is critically thin from its first hour,
+and the notice hands itself out at birth; for that zero counter the grace
+has no months to double, so its window is the response window itself —
+the only duration the case honestly owns, flagged for the operator to
+widen if he prefers: *your cushion is critically thin; reconstitute your
+advance*. And the engine reads the **frozen** standard of the lease's
+birth, never the live policy — a mid-life policy edit never re-prices a
+running tenancy's grace. The tenant either accepts or not: **accept** opens the grace
+window — the validity computed from the policy chain as the advance's
+value × 2, expressed in the bound pricing's own granularity (months on a
+monthly lease, converted through the duration chain on anything else) —
+and within that window the tenant must climb the balance back to the
+standard. The notice closes satisfied the instant the balance reaches
+the standard — the window is a deadline, not a sentence — and **silence
+escalates only while the demand stands unmet**: a tenant who rebuilt the
+cushion without ever clicking accept has satisfied the notice, and the
+seventy-two-hour escalation reads the balance, not the inbox. **For an AMOUNT-typed advance, the same arithmetic rides the
+birth-computed month-equivalents**: the window is *that* count × 2, so
+the grace stays a span of time, never a money figure — the escalation
+doubles a duration, never an amount. **And the grace is time bought, not
+immunity granted**: a tenant who accepted the notice and then lets the
+window lapse with the balance still below the standard escalates exactly
+like a refusal — the VACATION notice fires when the grace expires, because
+the acceptance's only product was the time, and the time is now spent.
+**Refusal, or silence past seventy-two hours from issue**, is
+the machine escalating: the VACATION notice fires automatically, no
+second invitation.
+
+**The VACATION notice.** Three months to vacate — and the ruling is
+mechanical: **issuing the notice sets the lease's validity to a datetime,
+the notice's own expiry — taken as the earlier-of against the prior end
+(below), so the stamp itself never lengthens a tenancy**. The retime is a stamp on the validity row,
+versioned and logged like every lease edit: the prior validity — a fixed
+end on a fixed-term lease, **null on the open-ended one, the lease whose
+validity never named an end** — is preserved on the notice's own record,
+and while the stamp stands the stamped end governs everything downstream:
+the expiry computation, the installments, the end-of-life walk. The
+schedule of remaining installments is reeled to the horizon, and the
+machine starts counting a tenancy that terminates on a date both parties
+can see. The horizon is **the earlier of the notice's expiry and the
+lease's own prior end** — a notice never extends a tenancy; if the
+validity was already going to end inside the three months, the notice
+changes nothing but the paperwork, and the machine says so rather than
+stretching a tenancy the notice did not earn. And the reeling is
+money-honest in both directions: an installment **already settled for a
+period the new horizon cuts away** becomes unearned rent — the machine
+does not claw it back mid-life (money is append-only); it is written into
+the settlement's arithmetic as a landlord debt, returned with the deposits
+at end of life, where the golden rule already knows how to pay the tenant
+back. **The landlord may cancel this notice** — the one human override the
+engine honors — and the cancellation is the stamp's exact reverse, cause
+and effect traced to the end: **the validity becomes what it was again —
+null again where it was null** (the open-ended lease returns to
+open-ended), the original end where there was one; the reeled installments
+are re-derived from the restored validity in the same transaction, each
+returning in the state its money history dictates: a period the tenant
+had already paid returns **settled** (the payment stands, append-only;
+the schedule never bills it twice), a period never paid returns as a
+future, unbilled obligation; and the derived unearned-rent landlord-debt
+dissolves **only for the periods the restored validity again covers** —
+rent prepaid for periods beyond even the restored end was earned by no
+tenancy at all, and it stays a landlord debt into the settlement —
+un-booked by the same laws that booked it, never more and never less. What is *not*
+undone: the money that moved while the notice stood — consumptions,
+payments, their auto-assessments, append-only, all of it — and the return
+to the DEPOSIT notice (fresh clock, fresh grace), because a landlord who
+calms down has, in effect, re-offered the tenant the reconstitution they
+first refused. The override carries no automatic cap — a landlord who
+calms down and re-escalates four times is exercising the human override
+the engine gave him, and each cycle is logged where the admin's eye can
+catch the pattern; a machine that second-guesses its one human override is
+a machine that has taken the override away.
+
+**The RECONVERSION notice** lives in the imported-lease machinery
+(6.6), and its arithmetic here: validity = **ceil(number of unpaid
+installments × 2.5)** in months — the multiplier is environment-bound
+(operator configuration, tunable per deployment), the ceil is the
+deliberately generous direction (11.5 lands on 12), and the rhythm it
+expresses is the two-months-one-installment cadence: diligent, the
+tenant clears the debts inside the schedule; a single skipped period is
+not a nudge but an escalation — the machine drops them straight to the
+VACATION notice, because a tenant who refuses even the negotiated pace
+of their own negotiated debts is telling the module something the module
+now says to the landlord.
+
+### Strange cases — the engine
+
+**The notices are derived-law objects**: every validity and deadline they
+carry is recomputed from the policy chain and the lease's actual record,
+never stored as judgments, which is what makes the dispute-era
+recalculation doctrine (6.7) arithmetically honest. **The tenant accepts
+the DEPOSIT notice and then also misses installments inside the grace**:
+the grace reconstitutes the *cushion*; rent due during it is still rent
+due — overdue mechanics continue independently, notices stack rather
+than merge, and the machine treats a thin cushion plus a fresh miss with
+the severity the combination deserves. **A grace that would outlive the
+lease**: the end-of-life walk arrives first and moots it — the settlement
+resolves the custody either way, and a notice chasing a cushion on a
+tenancy that is ending is noise the settlement silences. **The vigil's
+own outage**: an engine down for three days wakes to a backlog, and the
+drain obeys the same laws as a single read — **each consumption its own
+act** (crash mid-drain and the remainder resumes, never one giant
+transaction), the backlog walked in chronological deadline order, ties
+by row identity, every eligible miss consuming FIFO to the full extent
+custody allows, a row whose custody is exhausted stopping only itself
+(OVERDUE, loudly) while the drain continues past it, and every row the
+drain touches filing its own assessment with its own act — one per
+miss, exactly as a live walk would have. The vigil sleeping is a
+deployment's misfortune, never a tenant's amnesty: the deadlines were
+real on the days they passed. **A notice expires while the
+lease is DISPUTED**: the vigil skips its forced transitions on the
+disputed lease entirely (the freeze doctrine, 6.7) and the notice's own
+clock is recomputed at resolution from the same derivation. **An
+installment's deadline passes while the lease is DISPUTED**: the freeze
+covers the whole act — no overdue marking, no consumption, no assessment —
+and the resolution's recalculation decides whether the miss was real;
+only a real miss files its all-axes-1, so a dispute resolved for the
+tenant never leaves a judgment that was never earned. A judgment already
+filed before the dispute opened stays filed (the visit precedent: filed
+judgments are not auto-voided); its fairness is weighed on the ticket,
+and whether the reputation host should ever honor an admin's voiding of a
+wrongfully auto-filed assessment is the one point flagged for the
+operator — the default is that it does not.
+
+## 6.6 The imported lease: Case one (debts) and Case two (deposits left)
+
+Importing a paper or spreadsheet lease means decades of history becoming
+rows, and the specification splits it in two cases with two doors.
+
+**Case one — the tenant is in debts.** The landlord signs the breakdowns
+for every month the tenant owes them: selecting the pricing version the
+rate was real in, declaring which period each debt covers, and the
+system *generates the installments and their breakdowns automatically* —
+dates, amounts, the whole schedule materialized from the landlord's
+declaration. The tenant receives the drafted lease and verifies it:
+**REFUSE** and everything ends — the lease becomes CANCELLED and its
+details die with it, because an import that could not state its own
+truth should never half-exist on the platform. **ACCEPT** and the machine
+starts its strictest schedule: the RECONVERSION notice (ceil of the
+unpaid count × 2.5, env-bound, rounded up) becomes the lease's validity
+of record; the tenant owes at least one of the debt installments every
+two-month stretch of it; diligent tenure clears the whole backlog and
+the machine immediately hands them the DEPOSIT notice — the cushion is
+next, rebuilt to the policy standard's value inside the grace window,
+"and then everything is okay and everyone is happy", exactly the
+specification's own sentence. Two window-end laws close the arithmetic:
+**a backlog cleared inside the window dissolves the temporary clock** —
+the reconversion validity was borrowed time, and the tenancy it governed
+continues as any open-ended lease (the default), its schedule re-derived
+from the cleared record; and **a window that expires with debts still
+standing** — reachable only through irregularities the skip law would
+already have escalated — walks the end-of-life door (6.7), its remaining
+debts entering the settlement's arithmetic like every other tenancy's. **One skipped period** — even once — is
+the VACATION notice's direct trigger, no intermediate grace. And every
+skipped period files the same auto-assessment every installment's miss
+files (the general law of 6.3) — the imported lease is no reputation-free
+zone; the schedule's strictness is scored as well as enforced.
+
+**Case two — the tenant still has deposits left.** The landlord declares
+the holdings: the amounts already advanced or secured in the physical
+world — and the operator's note is explicit about who moves the money:
+**the landlord pays**, and the splits are created for the amounts. The
+landlord tops the custody up himself, the escrows standing for the
+tenant's deposit truth exactly like a platform-born lease, because
+custody at import time is custody, whatever the notepad said. And one
+destination law comes with it, sharp as a blade: **the sender of the
+import funding is the landlord, but the refund truth is still the
+tenant's** — at settlement the deposits return to the tenant, not to the
+wallet they were funded from. Pay's per-split refund therefore carries the
+host-declared recipient (pay's plan carries the law): notraius names the
+tenant on every settlement refund of an imported lease, the override is
+logged, and the golden rule's "returned to the tenant at a hundred
+percent" survives the import's inverted funding without ever crediting
+the wrong wallet. And the tenant verifies the declared holdings by the
+same wholesale door Case one gave the debts: **ACCEPT** and the lease
+lives; **REFUSE** and it is CANCELLED with the import's funding returned
+whole to the wallet it came from — the landlord's, by the sender default,
+because the declared tenant recipient is a *settlement* law, not a
+refusal law. If the
+declared values already reach the policy's optimum, the lease simply
+runs. If they fall short, the tenant receives the DEPOSIT notice, the
+tenant has the given time to reach the standard, and the machine
+continues.
+
+Both cases share the birth laws that protect them: the property must be
+ACTIVE to receive the import, the property turns LEASED the moment the
+imported lease exists, the frozen amounts at import are the money truth
+from then on, and the tenant's refusal is total rather than partial —
+imports negotiate wholesale, never piecemeal. And one stage is absent by
+nature: **imports carry no move-in conditions** — the platform-born
+condition documents cannot exist for a lease that started on paper before
+the platform did, so the imported lease runs CONFIRMED → ACTIVE directly,
+the boolean's bypass extended by origin; the settlement at its end of
+life remains universal as always.
+
+### Strange cases — imports
+
+**The landlord over-declares the debts** (more months than the tenancy
+calendar could have held): the schedule generator refuses a period the
+validity never contained — arithmetic, not judgment — and names the
+offending month loudly rather than materializing an impossible debt.
+**The debts' deadlines are historical and stay historical** — born
+OVERDUE at the dates the landlord declared, because they *are* the record
+of the past; the never-past-deadline law governs the *forward* schedule
+only, and the RECONVERSION clock paces the clearance of debts that never
+stop being late until they are paid. **Both cases on one lease** (debts
+*and* remaining holdings): the doors compose — the RECONVERSION clock
+paces the backlog while the declared holdings stand as the deposit truth,
+and the DEPOSIT notice takes the tenant the moment the backlog clears,
+exactly as each case promises alone. **The debts' rents predate the pricing's current version**:
+the granted version selection is why the landlord picks a version — the
+declared rent is the rent of the version, frozen like every amount. **The
+tenant accepts and immediately cannot pay the first period**: the
+RECONVERSION schedule does not bend itself; the lawful escape — the
+dispute door (6.7) — is where hardship goes, not a looser pace the
+machine quietly invents.
+
+## 6.7 The end of life: conditions out, repairs, the settlement's golden rule, and DISPUTED
+
+An ACTIVE lease reaches its validity's end or ends at the parties'
+choice, and the machine's end-of-life is the most evidence-preserving
+section in this plan. **When the boolean is TRUE**, the move-out stage
+comes first: the landlord has **one week** (the settlement row's
+deadline column is the clock) to upload the AFTER_MOVE_OUT conditions —
+the photographs and the enumerated damage — and list the repairs; the
+tenant validates or negotiates, documents cross, versions logged; either
+party unable to meet the other's agreement goes to the **support
+ticket** door. **Then the repairs**, their own negotiation: the landlord
+sends the
+repair rows with their breakdowns, the tenant confirms or pushes back,
+and again until both are ready — disagreement being, as the
+specification says, another ticket. Two of the operator's rulings fix the
+row's shape. **The payer of a repair is the `user_id` on its breakdown
+row** — the breakdowns table is the lease's universal money-row, and a
+repair's charge is simply a breakdown against the repair whose recipient
+column names who pays; the payer is a *declared* figure, never derived
+from authorship. And **no created-by machinery rides the repair row,
+because repairs are only ever created by the landlord** — the
+landlord-side counterpart is the row's sole author by construction,
+which is exactly why the payer must be declared on the breakdown rather
+than inferred from the creator: the landlord authors repairs charged to
+the tenant just as readily as repairs charged to himself, and the
+`user_id` is the only figure that tells them apart. The money rule
+follows: **repairs the landlord owes are never in the settlement's
+arithmetic** — they are the landlord's own works, paid by the landlord,
+outside the balance sheet; only repairs charged to the tenant enter the
+debts'.
+
+**Then the settlement itself, calculated automatically from the
+balances**: tenant debt = the outstanding installments (the OVERDUE and
+unpaid breakdowns, exact from their rows) plus the tenant-chargeable
+repairs; landlord debt = the deposits to return **plus any unearned rent a
+reeled horizon left behind** (6.5's truncation law — dissolved again on
+the notice's cancellation only for the periods the restored validity
+again covers, never for rent prepaid beyond even the restored end). And here the
+specification's golden rule, which this plan endorses as the finest
+sentence in the whole document: **first cancel the escrows, then pay
+the debts** — every remaining HELD escrow (SECURITY, ELECTRICITY, the
+unconsumed remainder of ADVANCE) is refunded to the tenant at a
+hundred percent, in one *logical* refund act — composed of pay's per-split
+refunds, a sequence that converges because refundable value is exactly the
+still-HELD value, so a failure mid-sequence re-runs and completes rather
+than half-paying; and *then*, if the tenant owes
+anything, a new payment is created for exactly that debt — from the
+wallet (INTERNAL) or in cash (EXTERNAL with the receipt machinery) —
+never as a "net" figure against the custody, because netting hides the
+two movements the logs must each be able to show. The settlement's
+breakdown rows are written per deposit kind and per unpaid installment,
+and the custody's refunds read pay's split-aware laws (no double-credit
+of already-released advance months — the month's money went to the
+owner as rent, and the settlement never returns it again). The deposits
+themselves are the "landlord's debt" in name only: their money sits in
+escrow, and Action 1 closes them automatically the moment the
+settlement is confirmed — custody needs no fortnight to pay late
+because there is nothing for anyone to pay. That is why the **two-week
+clocks are appointed to what is *billed*, never what is *held***: the
+tenant's side owes its remainder (the full debt figure, unnetted) within
+its fortnight, and the landlord's own repair rows ride their breakdown
+deadlines of the same length — excluded from the balance sheet per the
+payer rule, never exempt from a deadline. Either side unpaid past its
+fortnight becomes OVERDUE — and an OVERDUE
+settlement is not a dead end, it is the disputes' jurisdiction, with
+the admin's decision the only arbiter of the state both sides have
+failed to finish.
+
+**When the settlement is confirmed** — and under this plan everything a
+settlement has moved stays moved, because money history is append-only —
+the lease passes to **COMPLETED**, and the property passes to
+**DISABLED**, waiting for its owner to click "make it available" and
+let the machine show it to the world again. **When the boolean
+is FALSE** (the bypassed-conditions lease), the end-of-life is a
+**degenerate settlement**: no move-out stage, no repair negotiation, no
+photographs — the settlement machinery itself runs (Part 6.2's law:
+bypass removes bureaucracy, never money truth), and its automatic
+calculation resolves every held escrow: over a hotel stay the deposits
+go 100% back to the tenant, debts usually nil, one confirm, property
+DISABLED, worth the ten minutes the tenancy lasted.
+
+**DISPUTED** (the lease's own status, not the tickets') is the freeze:
+any ticket opened on the lease — the condition disagreement, the repair
+quarrel, the settlement fight, the import's contested totals — sets
+DISPUTED and the *vigil skips every forced action on that lease*: no
+notice escalation, no automatic transitions, while deposited escrows
+wait and human beings adjudicate. **Resolution is not a ruler waving;
+it is recalculation** (the operator's ruling): the admin decides the
+contested point, and the machine then re-derives every outstanding date
+from the same laws that first produced them — the notice and grace
+derivations, the reconversion's ceiling, the remaining installments —
+re-run over the lease's actual record *from the resolution moment*, and
+the admin confirms the recalculated schedule or sets values where the
+laws leave room. Past-behaviour ("how things worked in the lease"
+before the quarrel) is in the logs and feeds the derivation; the logs
+holding both pre-dispute and post-resolution schedules is the recalc's
+entire audit. No clock ever again stalls because someone raced an
+expiry by picking up the ticket-flavored anti-court; recalculation is
+the machine's reply.
+
+### Strange cases — end of life
+
+**The tenant disappears at settlement** (the famous case): refuses to
+leave or to pay, tickets pile unconfirmed — the specification's own
+answer is the support-ticket layer at each stage, the admin as the
+court, and the settlement's OVERDUE as the lever that turns the unpaid
+into the adjudicated. **The landlord stalls the move-out week** — the
+deadline passes: the settlement falls to the dispute door rather than
+auto-settling from one-sided photographs, because a settlement
+calculated over evidence one side declined to inspect is not a
+calculation, it is a verdict the wrong party wrote. **Both parties'
+two-week windows run out** money-side: the debts' OVERDUE rows and the
+dispute door are one machine (see above); the estate's human arbiter is
+part of the architecture, not a failure of it. **A lease ends with
+money still HELD and no settlement ever confirmed**: nobody pauses —
+the expiry path, renewal refused, eventually walks the same settlement
+door, and the machine's oldest law — *silence never keeps money* — is
+its floor.
+
+## 6.8 Cash across the lease — the EXTERNAL flow at work
+
+Every place money is owed inside a lease can be paid in cash **except
+the deposits** — the operator's formulation, which is also the theory
+in miniature: *deposits are escrow-bound, escrow-bound money is
+INTERNAL by definition*, and cash — flow-EXTERNAL, no escrow ever, the
+write-time guard being pay's own — is for what is *billed*, not what is
+*held*. Rent in cash: the receiver attaches the receipt and confirms
+the payment as PAID; the breakdown it satisfies settles — settled *from
+the confirmation*, since no escrow ever stood over that money and the
+word on the row records whose bill the physical act answered. Repairs in
+cash: same machinery, same attachment, same settlement's debts; an
+installment in cash: likewise. The contest path is the estate's
+standard everywhere: a ticket bound to the payment, the admin confirming
+or rejecting the claimed "it's really paid", the attachment standing
+as evidence — and a rejection that annuls a confirmation which had
+settled a breakdown re-opens that breakdown by the re-opening law of
+6.3, because a falsified claim cannot keep satisfying the bill it
+falsely answered. When a host service records the cash (a lease installment
+noted inside notraius's flow), the internal routes carry it there;
+when pay's own surface records it, the money is pay's — the platform
+stamp as always deciding whose truth a cash record rides on. All of it
+inherited, none of it reimplemented: pay's plan is this section's
+law-book.
+
+Two edges the clock forces, both money-sharp. **Unconfirmed cash does not
+stop the overdue machinery**: the ledger cannot see physical truth, so a
+deadline against a breakdown whose cash payment sits receiver-unconfirmed
+still runs — which is exactly why confirmation is the receiver's *duty*
+and the aging view of pay's reconciliation lane shames the laggards. The
+miss files its auto-assessment like every miss (6.3) — the ledger cannot
+see the hand-over, and the machine's truth is the only truth it has; the
+ticket is where the confirmation's lateness gets weighed, with the lease's
+logs carrying it for the admin.
+**A late confirmation on a breakdown custody already satisfied is refused
+loudly**: if the vigil consumed the advance month while the receiver sat
+on the confirm, that breakdown is already DEPOSITED and the machine
+declines to settle it twice — the physical remedy (the receiver returning
+the cash by hand, or the admin adjudicating the unfairness on the ticket)
+is the reason the estate keeps a dispute door at every stage; the ledger
+itself never rewrites a satisfied row.
+
+## 6.9 The relationships that make the machinery honest (data rules)
+
+Three identities, three meanings, never substituted: the **tenant** (the
+lease's user column — pays, is paid back, receives the notices), the
+**landlord-side counterpart** (the recipient named on the installments'
+`user_id`), and the **property owner** (the field all deposits and
+escrows release toward, the property's own owner, not the lease
+counterpart — the visits module's hardest rule, and the lease keeps it
+without re-learning it). The lease contract's own versioning is the
+estate's standard law (logs, before and after, replayable), conditions',
+repairs', breakdowns', notices', settlements' likewise — nothing in the
+lease remembers its own history; the logs remember it, or it isn't
+memory at all. And the deposit-standard chain stays state-scoped and
+unit-aware from the same policy definitions Part 3 and 4 set out: one
+definition, resolved per state, read in its own unit, valued per
+pricing, frozen per lease.
+
+---
+
+# Part 7 — Cross-cutting laws (the sentences every module obeys)
 
 **Versioning is always the same act.** A number on the row, a before-and-after
 entry in the logs, written in one transaction, replayable forever. Rules,
@@ -1516,16 +2473,27 @@ rather than defaulting; an unowned payment is nobody's payment.
 
 **Money is append-only and terminal.** Held until an explicit act; moved by
 splits that sum exactly, one credit per destination; refundable only until
-settled; every movement preceded by the state change that authorized it in
+settled — the legacy lane's law, with the matrix lane's refunds reading the
+still-HELD escrows instead of the funding word (pay's plan, Part 4); every
+movement preceded by the state change that authorized it in
 the same breath. The visit module's four money outcomes — full refund
 (pre-commitment or owner fault), 80/20 split (confirmed cancellation), full
 owner payout (completed visit), admin-directed payout (dispute) — are the
-only ones that exist, and each names its trigger explicitly.
+only ones that exist, and each names its trigger explicitly. The lease
+module's outcomes hang off the same law with the split as their unit:
+born-allocated custody (the matrix funded once at birth), release-on-demand
+(consumed advance months, each its own credit to the property owner),
+split-aware refund (settlement's golden rule — cancel what remains held,
+charge what is actually owed, never netting), and the cash lane (EXTERNAL:
+recorded promise, never custody) — every trigger named where it bites, and
+pay's per-split custody plan carrying the infrastructure law beneath all of
+it.
 
 **In-use means untouchable.** A rule in use cannot be disabled; an amenity
 in use cannot be retired; a type or duration in use cannot be deleted; a
 pricing with values cannot be removed; a property with a live visit cannot
-be deleted; a settled payment cannot be refunded. The same discipline, six
+be deleted; a property with a live lease cannot be deleted; a settled
+payment cannot be refunded. The same discipline, seven
 times, always resolving to *retire rather than destroy, flag rather than
 rewrite*.
 
@@ -1540,13 +2508,62 @@ amenity cascade's literal reading — default: holdings go down with the
 global amenity (and come back on re-enable unless the owner had disabled
 them personally); the property's own status is untouched by the cascade
 unless the operator means properties themselves to go down, which is a
-stronger rule and needs one confirmation. Each of these is written where it
-bites, restated here so review can find them in one place.
+stronger rule and needs one confirmation. From the lease rounds, the
+operator's rulings are already folded into Parts 5 and 6 (the all-axes-1
+cancel assessments, the unit column, the notices' many-to-one, the
+conditions bypass, the dispute recalculation, the status vocabularies being
+seeder concerns, the property LEASED/DISABLED interlock, the env-bound
+reconversion rounding, the born-allocated split matrix, and the repairs
+pair: the payer declared on the repair's breakdown `user_id` with the
+repair row's landlord-only creation needing no created-by (6.7)); the three flags
+still open in the lease chapter are: (6) the grace-window conversion an
+AMOUNT-typed advance inherits — now stated as the default at Part 6.5:
+the birth-computed month-equivalent count × 2, the grace always a span of
+time and never a money figure; the flag stands only so the operator
+confirms that reading, (7)
+renewal — the plan's default is that expiry without renewal is terminal and
+a fresh lease is the comeback path (Part 6.7's strange cases), and (8) the
+EXTERNAL-cash threshold — default: no amount gate for cash confirmations,
+the ticket path carrying every contest (Part 6.8). A ninth flag the two
+lease sources force: (9) **the property's availability after a lease
+completes** — the informal note says the property "becomes available
+again" the moment the settlement is marked as confirmed, while the formal
+specification's Step 4 and the interlock of Part 6.0 keep it DISABLED
+until the owner's explicit "make it available"; the plan's default is the
+formal rule — deliberate darkness between tenancies — and the flag stands
+so the operator settles which one the platform obeys. And the scrutiny
+rounds added their own defaults, stated where they bite: the lease's
+non-subscription declaration (6.0), the tenant's KYC gate re-read at the
+landlord's confirmation (6.1), the birth saga's compensation and
+orphan-adoption law (6.1), the top-up overshoot legality (6.3), the
+grace-failure escalation and the earlier-of horizon with its unearned-rent
+consequence (6.5), the imported lease's declared refund recipient (6.6),
+and the converging settlement composition (6.7) — plus this round's
+rulings, stated where they bite: the validity stamp, the VACATION notice
+setting the lease's validity to its expiry and its cancellation restoring
+the prior truth — null again where it was null (6.5) — and the
+installment-miss auto-assessment on the visit precedent, scored 1 on
+every axis, one per installment, filed with the resolution act (6.3,
+6.6), with the assessment-fairness default riding the visit law (filed
+judgments stay filed; the ticket weighs; whether the reputation host
+should ever honor an admin's voiding of a wrongfully auto-filed one is
+the one open point) — and the stress round's own defaults: the expired
+lease keeps its property dark until the settlement resolves (6.0, the
+zero-race law carried through the expiry shape), a cleared reconversion
+backlog dissolves the borrowed clock into an open-ended tenancy (6.6),
+and the vigil's consumption versus the tenant's own payment serializes on
+the breakdown's status, the loser's money returning whole (6.3) — each
+overturnable by one
+operator sentence. Each of these is
+written where
+it bites, restated here so review can find them in one place.
 
 ---
 
 *End of plan. Scope: types → durations → rules → policies → amenities →
-property → pricings → property policy values → visits. Everything after
-visits — leases, deposits, breakdowns, conditions, repairs, settlements,
-notices — is the next plan's subject, and picks up from the deposit-standard
-chain this one deliberately left at "standards set, money not yet moved".*
+property → pricings → property policy values → visits → lease. The lease
+chapter rides on the deposit-standard chain this plan's asset module
+deliberately left at "standards set, and now money arrives" — and on pay's
+companion plan, whose per-split custody law and EXTERNAL cash flow are the
+infrastructure beneath Part 6. Everything beyond the lease remains the next
+plan's subject when the operator says go.*
