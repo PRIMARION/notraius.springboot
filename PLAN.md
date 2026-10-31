@@ -2554,7 +2554,7 @@ backlog dissolves the borrowed clock into an open-ended tenancy (6.6),
 and the vigil's consumption versus the tenant's own payment serializes on
 the breakdown's status, the loser's money returning whole (6.3) — each
 overturnable by one
-operator sentence. Each of these is
+operator sentence. Each of these isI made a huge mistake . An agent made an git reset an evry uncommited work were lost 
 written where
 it bites, restated here so review can find them in one place.
 
