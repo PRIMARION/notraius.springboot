@@ -100,6 +100,10 @@ app:
       - com.notraius.modules.core.common.constants.NotraiusActivities
       - org.primarion.module.event.config.EventActivities
       - org.primarion.module.access.external.SharedActivities
+    # [estate standard] The chat-module families belong to the surface that
+    # hosts them; every host excludes them from its local activity registry
+    # (same line in pay/logistic/contract/primarion).
+    exclude: Chat Member Request Invite
   app-public-key: ${APP_PUBLIC_KEY:}
   app-private-key: ${APP_PRIVATE_KEY:}
   name: ${APP_NAME:springboot.notraius}

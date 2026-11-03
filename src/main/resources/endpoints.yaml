@@ -35,21 +35,39 @@ endpoints:
       findCurrency:
         method: POST
         endpoint: /api/v1/lookups/execute
+      # [new-PAY standard] The internal S2S surface after PLAN.md §3.2: the
+      # birth door takes the FULL split matrix (custodial=true mints per-split
+      # escrows), credit is conveyed later with the per-split release, and the
+      # S2S settle announce is a 410 tombstone (settlePayment key withdrawn).
       createPayment:
         method: POST
         endpoint: /api/v1/pay/internal/payments
       getPaymentByReference:
         method: GET
         endpoint: /api/v1/pay/internal/payments/reference/{referenceId}
+      # UPGRADE #58 amendment: one payment PER CURRENCY per invoice — the
+      # list-shaped fetch of a reference returns every currency row.
+      getPaymentsByReference:
+        method: GET
+        endpoint: /api/v1/pay/internal/payments/reference/{referenceId}/all
+      # PLAN.md v2 Part 5: money received OUTSIDE pay's rails, recorded
+      # through the identical machinery by a host service (the row takes
+      # the CALLING platform's stamp at birth).
+      recordExternal:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments/external
+      # The per-split custody engines (§7.5.1 SERVICE lanes): release
+      # conveys the split's credit to its beneficiary, refund returns the
+      # whole escrow to the funding wallet. One escrow, never an amount.
+      releaseSplit:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments/{paymentId}/splits/{splitId}/release
+      refundSplit:
+        method: POST
+        endpoint: /api/v1/pay/internal/payments/{paymentId}/splits/{splitId}/refund
       refundPayment:
         method: POST
         endpoint: /api/v1/pay/internal/payments/{paymentId}/refund
-      settlePayment:
-        method: POST
-        endpoint: /api/v1/pay/internal/payments/{paymentId}/settle
-      calculateCommissionFee:
-        method: POST
-        endpoint: /api/v1/pay/platform/commissions/calculate
   primarion:
     auth:
       introspect:

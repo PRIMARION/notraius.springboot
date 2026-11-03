@@ -3,6 +3,17 @@
 # Governance rules:
 #   - Reference data is READ-ONLY through this API. Writes belong to
 #     migrations / seed tooling.
-#   - Definitions arrive as the notraius domain grows. Today the host
-#     registers nothing — this empty file keeps the loader's scan valid.
-definitions: []
+#   - The activity registry (activities) arrives from shared.yaml via the
+#     classpath* scan — never redeclared here: the loader fails loudly on
+#     duplicate table names.
+#   - Definitions arrive as the notraius domain grows.
+definitions:
+  - tableName: entities
+    repositoryBeanName: entitiesRepository
+    entityClassName: com.notraius.database.entities.reference.Entities
+    description: Notraius entity codes (reference list; authenticated reads)
+    methods:
+      PERSONAL:
+        - findAll
+        - findById
+        - findByCode

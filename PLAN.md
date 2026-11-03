@@ -24,7 +24,7 @@ schema rows in `DATABASE.txt` (leases, deposits, breakdowns, conditions,
 repairs, settlements, notices) are now planned in full as Part 6. The
 schema-level deltas the lease needs (the policies `unit` column, the
 breakdowns `deadline` column, the notices restructure, the pricing
-`requires_conditions` flag) are stated where they bite, but
+`checkable` flag) are stated where they bite, but
 `DATABASE.txt` itself is only edited with the operator's approval.
 
 Four grounding sources were read completely before a word of this was
@@ -37,10 +37,16 @@ the end is null), policies (admin standards with min, max, mandatory flag,
 status, and a `state_id` for geographic scoping), rules (title, visibility,
 description, version, owning user, status), amenities (typed data — boolean,
 integer, string — with code, label, status, and an owning user that is null
-when admin created it), and durations (the renamed catalogue: a unit code and
-a value saying how many). `property` holds properties (owner, status, type,
+when admin created it), and durations (the renamed catalogue: a reference
+to the unit's type row and a value saying how many — the operator's schema
+correction swapping the free `code` column for `type_id`). `property` holds properties (owner, status, type,
 currency, description, an external location reference), pricings (property,
-commercial type, duration reference, amount, version, validity window),
+commercial type, duration reference, amount, version, validity window,
+a status (LIVE/PAUSED/EXPIRED — this plan's correction, stated where it
+bites in 4.2), and a
+`checkable` flag — the operator's approved name, a boolean the owner ticks
+— that decides whether the lease module's move-in/move-out condition
+stage exists at all),
 property-level policy values (pricing, policy, value, status, version),
 property-rule selections (property, rule reference, validity, version) and
 property-amenity holdings (property, amenity, value, status). `visit` holds
@@ -51,8 +57,11 @@ reference, terms reference, validity, status), deposits (lease, type,
 balance), breakdowns (amount, type, payment linkage via entity/reference,
 recipient), conditions (lease, move-in/move-out type), repairs (condition,
 title, description), settlements (lease, deadline), and notices (type,
-reason, validity — a many-to-one child of leases, whose own PK and
-`expires_at` column are this plan's schema corrections). The general rules
+reason, validity — a many-to-one child of leases, whose own PK is this
+plan's schema correction; per the operator's ruling the notice purges any
+`expires_at` and any status id it might have carried, because the validity
+id it holds is its clock — the validity's end is the expiry, and the
+response field plus that window are the state). The general rules
 at the top of the file bind everything: every
 table has id, timestamps and creator; **versioning happens through
 `notarius.logs` with old and new data**; cross-module links are plain UUIDs
@@ -163,18 +172,23 @@ every use by the caller of this guard, not here.
 
 ### SubscriptionGuard — "has this user exhausted their plan limit?"
 
-The twin of the rate limiter, and the reason the visits module must declare
-itself. Limits bind per permission row through the plan's features, and the
+The twin of the rate limiter — and, like every guard in this estate, it is
+**implemented on all methods**: the guard runs wherever a business
+operation runs; what decides whether it *bites* is the existence of a row
+(the operator's law, restated in Part 7). Limits bind per permission row
+through the plan's features, and the
 guard answers **only for initiating operations** — initiate, create, submit,
 request, pay, accept, send, grant, sign, assign, bulk-create and two special
 creates. Follow-ups (confirm, cancel, get, list, export, update) are never
 limited: they operate on work a limit already admitted. The counting window
 is the subscription's own validity row — renewal resets the counter cleanly,
-and the free plan's open-ended window counts from its start to now. Three
-escape hatches make it fail open by design: no live subscription means no
-limit surface at all; no bound feature or a null limit means unlimited; an
-unregistered family means nothing to count against. Usage counting is the
-host's job — **every project, notraius included, already provides a
+and the free plan's open-ended window counts from its start to now. The
+three fail-open cases are not exemptions carved into selected methods —
+they are simply what the guard *finds* when the rows are absent: no live
+subscription means no limit surface at all; no bound feature row (or a null
+limit) means unlimited; an unregistered family means nothing to count
+against — row existence decides, on every method alike. Usage counting is
+the host's job — **every project, notraius included, already provides a
 UsageCounter bean that counts rows in the host's own logs table** inside the
 window. The caller resolves whose subscription to check (own user, app owner,
 or the user a service acts for).
@@ -182,10 +196,11 @@ or the user a service acts for).
 ### RateLimitGuard — "how often may this happen?"
 
 Sits at *both* policy entry points — the endpoint's authority expression and
-the service-side policy enforcement — and is charged once per request because
+the service-side policy enforcement — **on every method**, and is charged
+once per request because
 both run in the same request cycle. A rule row for an activity, operation and
-scope turns enforcement on; **no row means open**, the same contract the
-subscription guard applies to limits. Two scopes are consulted because the
+scope turns enforcement on; **no row means open**, row existence deciding
+exactly as the subscription guard finds it. Two scopes are consulted because the
 activity, operation and scope together *are* the rule identity: the user
 scope counts the attributable principal (the user, or the acting app for a
 service call), the IP scope counts the caller's address when the trace
@@ -224,8 +239,11 @@ seat's consents. Fourth the plan-limit policy. Fifth the rate-limit policy,
 deliberately outside the fail-closed catch so a quota breach is never a silent
 denial. Five layers passed means the permit is recorded, which unlocks the
 ownership fallback described above. For notraius this means: no endpoint of
-any module in this plan works until its activity family, its operation
-permission rows, and (where relevant) its rate-limit and plan bindings exist.
+any module in this plan works until its activity family and its operation
+permission rows exist — while rate-limit and plan bindings are governed by
+**row existence**, the operator's law: where such a row exists the guard
+bites, where none exists it finds nothing to enforce, and every method
+passes through the guard stack either way.
 
 ### PaymentOwnershipGuard — whose payment is it, and who may drive it
 
@@ -309,16 +327,18 @@ Management splits strictly by authority tier. The **admin manages**: creates
 types, edits labels and descriptions, arranges the hierarchy, retires types.
 **Personal and enterprise users view**: they read the catalogue to populate
 their dropdowns and filters, and nothing else — a personal user cannot mint a
-type, cannot rename one, cannot reparent one, cannot retire one. This split is
-expressed through the generic lookup surface: the type table is registered in
-notraius's lookup definitions with its methods declared per authority tier —
-read methods for the personal and enterprise tiers, the writing methods
-(matching the repository's save and delete capabilities) for the admin tier
-only. The lookup service enforces this by asking the caller's authority
-resolver whether the tier holds for the current caller; nothing is hardcoded
-in the table itself. The host's lookup file is currently empty — registering
-types (and durations, below) is the first concrete act of building this
-module.
+type, cannot rename one, cannot reparent one, cannot retire one. And per the
+operator's ruling this split no longer rides the generic lookup surface: the
+type table **graduates into a full-fledged module with its own controller** —
+its own endpoints for read, create, edit, reparent and retire, its own
+activity family and permission rows, and the tier split expressed the way
+every module in this plan expresses it: read endpoints gated to the personal
+and enterprise tiers, writing endpoints gated to the admin tier, through the
+endpoint's authority expression and the five-layer gate rather than through a
+generic table declaration. Nothing is hardcoded in a definition file — the
+permission rows are the truth, exactly as Part 0 demands of every module.
+Building this module (controller, activity family, permission rows) is the
+first concrete act of the work below.
 
 ## Edge cases and strange cases — types
 
@@ -332,7 +352,7 @@ the path instead.
 **A type in use cannot vanish.** A type referenced by a live property,
 pricing or policy value is retired rather than deleted: the row stops
 appearing in selection lists, existing references keep resolving, history
-keeps meaning what it meant. The lookup surface's delete method exists for
+keeps meaning what it meant. The module's delete endpoint exists for
 admin use, but the service behind it must answer the "is anything pointing at
 this" question first — a catalogue delete that orphans a property's type
 reference is a corrupt property, and the plan refuses it.
@@ -372,14 +392,33 @@ stays inside it.
 
 ## What a duration is
 
-A duration row is a unit code and a value saying how many: HOUR with value
-ten, MONTH with value one, MINUTE with value thirty. The catalogue is seeded
-by the admin through the lookup surface — registered like types, with read
-methods open to personal and enterprise tiers and writing methods admin-only —
-and the canonical units named by the specification are SECOND, MINUTE, HOUR,
-DAY and MONTH. The rename from the old word matters conceptually: this table
-never described *how often* anything repeats, it describes **how long one
-unit of something lasts**, and every use in this plan is exactly that.
+A duration row is a **unit type reference and a value saying how many**:
+HOUR with value ten, MONTH with value one, MINUTE with value thirty. The
+operator's ruling fixes the schema behind that sentence: the old free-text
+`code` column is replaced by **`type_id`, a foreign key into the types
+catalogue** — SECOND, MINUTE, HOUR, DAY and MONTH are *type rows* under
+their own entity binding (the entity is the namespace, so a time unit never
+hangs beneath a property kind), admin-seeded like every other vocabulary
+through the types module of Part 1 — and the duration row says **for this
+type, the actual value is N** (HOUR + value 10 = ten hours). The rename
+from the old word still matters conceptually: this table never described
+*how often* anything repeats, it describes **how long one unit of
+something lasts**, and every use in this plan is exactly that.
+
+Who creates what follows the operator's split: the **unit vocabulary is
+admin-seeded** (the type rows — the admin owns the alphabet), but the
+**duration rows are created by users** — a personal user who needs a
+WEEK + 2 duration mints it themselves instead of queueing behind an admin
+for every calendar combination, which is the better way and keeps the
+catalogue from "quickly becoming messy" in admin hands. Creation is
+therefore an ordinary user-tier write through the lookup surface, whose
+write methods open to the personal and enterprise tiers for this table
+(reads stay open to every tier, as ever), governed by two disciplines that
+keep a user-grown catalogue clean: **(type, value) is the identity** — HOUR
++ 10 created twice is one row, the second creation refused as a duplicate —
+and the value must be a positive integer (below). The canonical units the
+specification names are the admin's seeded rows; anything else a user
+creates follows the same two rules.
 
 ## Where it shines: pricings
 
@@ -396,7 +435,7 @@ MONTH with value one. The type is the name; the duration is the physics.
 **The value must be meaningful.** The column is nullable in the schema, but a
 duration with no value cannot answer "how long", so any duration referenced by
 a pricing must carry a value of at least one; the catalogue may contain
-placeholder rows for admin drafting, but a pricing never binds to one.
+placeholder rows for drafting, but a pricing never binds to one.
 Zero and negative values are refused for the same reason — a night of zero
 hours prices nothing.
 
@@ -414,10 +453,10 @@ the semantics the catalogue exists to pin down.
 row's value changes the physical meaning of every pricing bound to it — a
 night that was ten hours becomes twelve, silently repricing nothing and
 everything at once. Therefore: a duration in use by any live pricing is
-retired rather than edited; new pricings bind to new rows. The admin who
-wants "nights are now twelve hours" creates a new duration and the owner
-migrates pricings deliberately, each migration visible as a pricing version
-in the logs.
+retired rather than edited; new pricings bind to new rows. Whoever wants
+"nights are now twelve hours" — a user, now that durations are user-created
+— creates a new duration row (HOUR + 12) and the owner migrates pricings
+deliberately, each migration visible as a pricing version in the logs.
 
 **Deleting a duration in use** is refused for the same reason as a type in
 use: the reference must keep resolving.
@@ -457,9 +496,18 @@ rule** — and, when selecting rules for a property (Part 4), any user may pick
 it. PRIVATE means **only the creator can view it and only the creator can use
 it** — it never appears in anyone else's lists, searches, or selections, and
 its contents are not readable through any read path that does not belong to
-its creator. There is no middle state, no "unlisted", no sharing-with-named-
-users: the specification's world has exactly two lights, and the plan does not
-invent a third.
+its creator — with **one exception the operator has ruled, the chicken-and-
+egg at the heart of the module: rules are private, but rules are linked to
+a property, and the property must be viewable with its rules**. A PRIVATE
+rule that a property has selected is readable **through that property**:
+every viewer of the property sees the rules in force on it — title,
+description, attachments included — because a listing whose house rules the
+tenant cannot read is not a listing. The exception is exactly that wide and
+no wider: through the property that holds the selection, and nowhere else.
+There is no middle state, no "unlisted", no sharing-with-named-users: the
+specification's world has exactly two lights, and the plan does not invent
+a third — the property path is not a third light, it is the context where
+the rule actually applies.
 
 Admin visibility over PRIVATE rules follows the estate's staff convention:
 staff roles see everything for moderation purposes (the same way support
@@ -528,7 +576,9 @@ current set of files hangs off the current rule row, while each log entry
 records which attachment identifiers belonged to the rule at that edit, so
 reconstitution of an old version also reconstitutes its file list. A
 PRIVATE rule's attachments are as private as its text — no read path exposes
-them to anyone but creator (and staff moderation); a PUBLIC rule's
+them to anyone but creator (and staff moderation), the property-listing path
+above being the one exception, where the attachments travel with the rule; a
+PUBLIC rule's
 attachments are readable by every authenticated user alongside the rule.
 Deleting an attachment the rule still references is refused; removing a file
 first detaches it from the rule, and the detach is itself a versioned,
@@ -545,10 +595,13 @@ The specification mentions filtering in the selection context (Part 4), so
 rule reads must support: creator's own rules (all of them, both
 visibilities), the PUBLIC set (everything created by anyone), text search
 over title and description, and status filtering. The invariant that ties it
-together: **no read path ever returns a PRIVATE rule to anyone but its
-creator**, so filtering happens *before* results are shaped, not as a
+together: **no read path other than a property's own listing ever returns a
+PRIVATE rule to anyone but its creator**, so filtering happens *before*
+results are shaped, not as a
 post-filter — a private rule must not leak through a count, a search
 suggestion, or an autocomplete even if the row itself would later be denied.
+The property path is not a leak: it returns the rule because that property
+holds the selection — a fact of the listing, not an entry in the catalogue.
 
 ## 3.2 Policies management (admin standards)
 
@@ -574,7 +627,11 @@ thing, here is the allowed range and whether you must comply at all". The
 minimum and maximum are numeric bounds; the mandatory flag says whether
 compliance is required or optional; the status says whether the standard is
 currently in force. The code gives it a stable identity (ADVANCE is the
-specification's worked example), and the state identifier scopes it
+specification's worked example) — and the policy's **type** is what the
+machinery reads to know *what kind of thing* the standard governs: ADVANCE
+is a policy of type **INSTALLMENT**, a prepaid advance on installments,
+which is why Part 6 derives its split behaviour from type and unit alone
+with no hardcoded ADVANCE logic (6.0) — and the state identifier scopes it
 geographically — the mechanism the specification builds an entire scenario
 around, treated fully in Part 4's policy-values section: **a policy for Benin
 can differ from a policy in Nigeria**, and the state on the policy is how the
@@ -613,6 +670,28 @@ retroactively unpublish them (grandfathering: live configurations stay live)
 but blocks any *new* publication missing the value, and flags existing ones
 as incomplete for their next edit. An optional policy with no value simply
 carries no standard; absence is legal.
+
+**And the operator's addition, the gift to whoever fills in property
+details: all mandatory policies applicable to a property's state are
+automatically created as value rows, pre-filled with the minimal value —
+the minimum the admin set — as the default.** The state scope is exact
+("property state only, of course"): only the chain that resolves for that
+property's own state is auto-created, the stateless fallback included per
+Part 4.3's resolution rule — another state's standards never touch it, and
+a property whose location does not resolve has no state and no chain at
+all: nothing is auto-created for it, because per Part 4.3 it is stopped,
+not defaulted. The
+creation happens where value rows live, at the pricing's birth, so an owner
+who adds a monthly pricing inherits its mandatory values already set at the
+admin's floor and simply edits them within bounds if the market demands
+more (a versioned, logged act like any value edit). The same backfill runs
+when a policy is *made* mandatory mid-life: every applicable pricing
+receives its row at the minimum, so a mid-life flip eases into place
+instead of blocking publication by mere absence. Exactly one case keeps the
+old refusal standing: a mandatory policy whose admin never set a minimum
+has no default to give — there is nothing to pre-fill — and publication
+waits on a human with the policy named loud, because a default of nothing
+is not a default.
 
 **Bounds are advisory-strict**: a value must be within min and max when it is
 set. If the admin later tightens bounds, existing out-of-range values are
@@ -783,12 +862,17 @@ the staff path handles it.
 Creation is deliberately partial. A user may save a property with as little
 as a title and have it exist in **DRAFT** status — incomplete, invisible to
 the market, editable at leisure. Every subsequent act (describing, attaching
-media, choosing a type and currency, setting pricings, selecting amenities,
+media, choosing a type, giving the property its location — the anchor from
+which currency and state arrive, below — setting pricings, selecting
+amenities,
 picking rules, defining policy values) is an edit against the draft, each
 versioned and logged. The draft state answers the specification's "they can
 save first" exactly: nothing needs to be complete until the owner decides to
-publish, and the completeness checks (a type, a currency, at least one
-pricing, mandatory policy values where required) gate **publication**, not
+publish, and the completeness checks (a type, a location that actually
+resolves to a state — without which no
+currency and no state exist, and an unresolvable one is a hard refusal,
+never a stateless pass (4.3) — at least one
+pricing whose window is live, mandatory policy values where required) gate **publication**, not
 saving. A half-built property is a legal object; a half-built property in
 the market is not.
 
@@ -819,7 +903,12 @@ on a published property re-runs the completeness check before it lands.
 **Currency follows the property.** The property carries one currency, and
 every amount anywhere beneath it — pricings, policy values, later deposits —
 is expressed in that currency. A pricing never has its own currency; a policy
-value never has its own currency; they inherit, always. This is also why
+value never has its own currency; they inherit, always. And per the
+operator's ruling the currency is **never chosen, never typed, never
+edited**: the user decides the property's *location*, the backend fetches
+the states from the logistics platform, the resolved state picks the right
+currency, and the system applies it at backend level — the property's page
+has no currency field, only a location. This is also why
 policy standards are state-scoped (below): different states mean different
 countries mean different currencies, and the property's location resolves
 which world it lives in.
@@ -830,7 +919,13 @@ parse or copy the address; it holds the pointer). What notraius *does* derive
 is the state: the location resolves to a state identifier, and that state is
 what matches the property against state-scoped policies. The chain is
 property → location → state → policy, and it is the foundation of the Benin
-versus Nigeria scenario.
+versus Nigeria scenario. And both links of that chain are **born immutable**,
+the operator's ruling: a property's location is set once and never editable
+thereafter — from birth it becomes immutable — so the state it resolves to
+never changes either, and with them the currency never changes. The same law
+binds the source: a location's own state, in the logistics platform, never
+changes once born — an address whose country could drift underneath a
+property is an address the platform refuses to build on.
 
 ### Amenities and rules on the property: selection, values, filters
 
@@ -844,7 +939,10 @@ defined by the specification: **the rules he created himself, or public
 rules** — his own PRIVATE and PUBLIC rules (he is their creator, so both are
 his), plus every PUBLIC rule anyone else created. Private rules of other
 users are unreachable — not filtered out after retrieval, but never queried
-at all, so counts and search suggestions agree with details. The
+at all, so counts and search suggestions agree with details. And once a rule
+*is* selected, the property's read path shows it to every viewer of the
+property regardless of its visibility (3.1's chicken-and-egg ruling):
+**selecting stays exclusive, viewing through the property does not**. The
 specification's *he can filter* means the selection UI searches that pool by
 text, visibility, creator and status; whatever filter is applied, the pool's
 definition is invariant. Each selection is a row of its own — the property,
@@ -886,18 +984,23 @@ silently hidden — visible decisions only). A property whose *type* is retired
 after publication keeps its type reference and keeps publishing; the retire
 only removes it from new selections.
 
-**Currency change after pricing exists.** Changing a published property's
-currency would reinterpret every stored amount (a number meaning francs now
-meaning naira) — refused once any pricing or policy value exists. The path
-is: unpublish, clear or migrate amounts deliberately, republish. The plan
-never silently multiplies money.
+**Currency change — refused, always.** The currency is derived, not
+editable: location → state → currency, applied at backend level, and no
+edit path exists at all — not with pricings, not without them, not by
+unpublishing first. The old escape hatch (unpublish, clear or migrate
+amounts deliberately, republish) is gone with the field itself: a number
+meaning francs can never come to mean naira, because nothing ever
+re-derives a currency. Changing money's unit would reinterpret every stored
+amount, and the plan never silently multiplies money — so the platform
+never offers the act.
 
-**Location change after publication.** Allowed (the owner moved the listing
-to a new address), but it re-resolves the state, which re-resolves which
-policy standards apply — so a location edit re-runs the completeness check
-and may surface a now-missing mandatory value before it lands. The old state's
-values remain stored, marked as not-applicable-to-current-state rather than
-deleted: if the owner moves back, they re-apply without retyping.
+**Location change — refused, always.** The operator's ruling closes the old
+door outright: a property's location is **never editable, from birth
+immutable**. The owner picked the address once; the state it resolved to
+never changes; the currency built on that state never changes; the policy
+chain selected by the state never shifts underneath. There is no
+"owner moved the listing" path, no re-resolution, no completeness re-run —
+the anchors are anchors because they cannot move.
 
 **Duplicate titles, empty descriptions, zero-attachment publications** — all
 legal. The market's quality bar is the owner's business; the system's bar is
@@ -914,16 +1017,23 @@ lift a suspension it did not set.
 ### What the owner decides
 
 For their asset, the owner defines pricings: which **commercial types** the
-property supports, each expressed as its own pricing row — the property's
-supported pricing systems are *derived* from which types it has rows for: a
-property with a nightly row supports nightly, a property with a monthly row
-supports monthly, a property with both supports both, and **removing the last
-row of a type withdraws that system** — support is never a separate flag that
+property supports, each expressed as its own pricing row — and **there is
+ever only one such row per type for the life of the property** (the
+operator's one-pricing law, spelled out below): the property's supported
+pricing systems are *derived* from which types it has rows for: a property
+with a nightly row supports nightly, a property with a monthly row
+supports monthly, a property with both supports both, and **removing the
+row of a type — or letting its window end, which sets it EXPIRED —
+withdraws that system**; support is never a separate flag that
 can drift out of sync with reality; the rows are the reality. Each row
 carries: the type, the **duration** that gives the type its physical meaning
-(Part 2), the amount, its own version, and its own validity window — the
+(Part 2), the amount, its own version, its own validity window — the
 reusable from/to that says when this price applies, permanently when the end
-is null.
+is null — and the **`checkable` flag**: a boolean the owner ticks (the
+operator's ruling on the column: the name is `checkable`, better than the
+`requires_conditions` wording it replaced), which decides whether any lease
+bound to this pricing runs the move-in/move-out condition stage of Part 6.2
+or bypasses it entirely.
 
 ### Money follows the property; time follows the duration
 
@@ -935,51 +1045,116 @@ per night, from here to there" — and every downstream calculation
 effectiveness, comparison, later deposit maths — reads those four facts and
 never guesses.
 
-### Validity windows and overlap
+### Windows, versions, and the one-row law
 
-Two pricings of the **same type** with overlapping windows on one property
-would make the price at a given instant ambiguous, so overlap within a type
-is refused: at any moment, at most one live pricing per type answers the
-question "what does a night cost now". Different types may overlap freely —
-a monthly price and a nightly price coexisting is not a conflict, it is a
-property that rents both ways. A window may be permanent (null end), may
-start in the future (a scheduled price change), may end (a seasonal price
-that has passed — it simply stops answering). Editing a window or an amount
-is a version bump and a log entry, like everything; the previous version
-remains reconstructible, so "what did a night cost last August" stays
-answerable.
+**One pricing per property per type — ever.** The operator's ruling gives
+the pair (property, type) a lifetime identity: a property's nightly row
+exists once, and every future nightly price that property ever has is a
+later **state of that same row**, never a sibling competing with it. Two
+same-type rows can therefore never coexist, and the ambiguity the old
+overlap refusal existed to prevent is gone by construction: at any instant
+exactly one row of a type answers "what does a night cost now", through
+the version whose window contains that instant. Different types are still
+different rows and coexist freely — a monthly price and a nightly price
+together is a property that rents both ways, untouched by this law.
+
+Each pricing row carries a **status** — LIVE, PAUSED, EXPIRED — which this
+plan adds to the schema (stated here, where it bites: `DATABASE.txt`'s
+`property.pricings` lists no such column). A window may be permanent (null
+end), may start in the future (a scheduled price change), may end (a
+seasonal price that has passed). The window is what moves the status, and
+the operator's rule for the end is exact: **when the validity is done, the
+pricing's status becomes EXPIRED** — by the clock, not by any owner's
+click. EXPIRED is a full stop on *new* application and nothing more: every
+existing reference — the lease created from this pricing, its frozen
+amounts, its policy value rows, the version chain — keeps resolving the
+row and fetching its values exactly as before; what is refused is anything
+*new* binding to it: no new lease may be started from an EXPIRED pricing
+(Part 6's birth gate reads this status), and no publication may lean on it
+as the property's price (the strange case below). History reads; the
+future does not start. PAUSED is the owner's deliberate stop, a different act with a
+different cause, and it never masquerades as the clock's verdict.
+
+**A new window on the same pricing is issued as a new validity row, and
+the version bumps.** The owner never stretches or edits the window in
+place: wanting the price to answer again (a seasonal reopening, a
+scheduled change, an extension) means issuing a fresh validity against the
+same pricing row and moving its version forward — one pricing, new window,
+new version, a logged act like every other, with the previous version and
+its window remaining reconstructible, so "what did a night cost last
+August" stays answerable. Editing an amount is the same version bump
+without a new window. While no window contains the present instant the
+row stands EXPIRED, whether or not a successor window is already scheduled
+— and the instant a successor window begins, the row answers again.
+
+**Windows are half-open, and successive versions hand over at the
+boundary**: when one window ends exactly where the next begins, the end
+instant belongs to the next version — a price change at midnight is
+unambiguous, the handover instant belonging to the new version, with no
+gap, no overlap, and no instant where two versions both claim the
+question. Since successive windows are successive versions of one row, the
+"touching windows" case the operator flagged is now the *normal* shape of
+a price change rather than an edge between two rows — the half-open
+reading is what makes the handover clean.
 
 ### Lifecycle and in-use discipline
 
-A pricing may be created, edited, paused (its window closed or its row
-disabled — the owner's choice) and removed. Removal is refused while a live
+A pricing may be created, edited, issued a new window, paused (the owner's
+act — status PAUSED, distinct from the clock's EXPIRED) and removed.
+Removal is refused while a live
 reference depends on it — within this scope, a policy value row points at a
 pricing, so removing a pricing that has policy values refuses or takes the values with it; the plan refuses, because the values
 are the property's deposit story and destroying them to delete a price is the
 wrong trade. And the lease module of Part 6 adds a second, stronger in-use
 reference — a pricing a lease has been created from cannot be removed while
 that lease lives — the discipline is already the same, and the lease only
-makes it heavier.
+makes it heavier. (An EXPIRED pricing is never a removal candidate either:
+it is the row every historical reference still resolves, which is the whole
+point of EXPIRED being a reading status rather than a deletion in disguise.)
 
 ### Strange cases — pricings
 
 **A pricing bound to a retired duration** keeps working exactly as written —
 retirement blocks new bindings, never breaks existing ones.
 
-**Zero-amount pricing** (a free promotional month) is legal; negative is not.
+**Zero-amount pricing — never possible, an aberration.** The operator's
+ruling is absolute: a pricing row's amount must be a strictly positive
+number (negative was never legal; zero is now equally refused at creation
+and at edit, with the amount's positivity part of the row's validity, not
+a warning). There is no free promotional month, no zero-rent window, no
+"price it later" draft: a pricing that says nothing is not a price, and
+the law covers **every** pricing row in the system — property pricings and
+the visit pricings of Part 5 alike, since the visit pricing's amount is
+the amount a visitor is charged.
 
-**A pricing whose window has expired** is history: it stops being offered,
-keeps its row, keeps its version chain, and reappears if its window is
-extended.
+**A pricing whose window has expired** stands EXPIRED: it stops being
+offered — the property's support for that system withdraws until a new
+window is issued — but it keeps its row, its version chain, and every
+lease and policy value built on it keeps reading it without a stutter; it
+answers again the moment a new validity is issued against it (the version
+bump above). What it never does is accept something new while expired.
 
-**The same type twice with touching windows** (one ends exactly where the
-next begins) is *not* an overlap — windows are half-open in intent: the end
-instant belongs to the next pricing, so a price change at midnight is
-unambiguous.
+**The same type twice with touching windows** cannot happen as two rows
+any more — one pricing per type ever — so the case now reads as two
+*successive versions* of the one row meeting at an instant: half-open, the
+boundary instant belongs to the next version, and a price change at
+midnight is unambiguous.
+
+**A multi-unit stay never touches pricing validity.** A guest who takes
+four nights does not lock the property's mornings away from everyone else:
+a pricing's window says when *the price* answers, not when the property is
+bookable — availability is the booking's own business, not the validity's.
+And needing one more night late never stretches a validity either: the
+stay ends, the next stay starts the process over, its own request, its own
+money, its own window of agreement — validity is issued once and never
+bent to fit a stay (the operator's "extra careful" rule; his own verdict
+on the alarm stands: false alert, already taken care of).
 
 **A property with no pricing at all** is a legal draft and an unpublishable
-one — the completeness gate needs at least one row of at least one type, or
-the property has no answer to "what does it cost".
+one — the completeness gate needs at least one row of at least one type,
+or the property has no answer to "what does it cost" — and by the same
+gate a property whose rows have all gone EXPIRED is unpublishable too: an
+expired price is not an answer.
 
 ## 4.3 Property-level policy values (where deposits get their standards)
 
@@ -992,7 +1167,10 @@ names a policy, carries a number, its own status and its own version. The
 specification's worked example is the anchor of the whole design: **the admin
 sets ADVANCE with a minimum of 3 and a maximum of 6** (months); **the user,
 on a pricing whose type is MONTHLY, sets the policy ADVANCE to 4** — meaning
-this pricing asks for four months of advance. The standard is the admin's;
+this pricing asks for four months of advance. (And with the operator's
+auto-creation, that pricing would have *opened* at 3 — the admin's floor —
+the moment it was born; the owner's act of setting 4 is the owner lifting
+the default, not the system waiting for input.) The standard is the admin's;
 the number inside the standard's bounds is the owner's; the pricing is the
 context that gives the number its unit (four *months* because the pricing is
 monthly).
@@ -1029,12 +1207,16 @@ while Nigeria's is AMOUNT valued 200,000, same policy code, same chain,
 different *kind* of standard — and the state-scoped resolution of Part 4.3
 keeps them from ever colliding.
 
-Three consequences get decided by this one column. **Validation** reads the
+Four consequences get decided by this one column. **Validation** reads the
 unit first: min and max compare in the policy's own unit, refusing loudly
 when the unit is missing rather than guessing. **The grace arithmetic** of
 the lease's notices (value × 2) resolves through the same chain — units
 convert to days and months via the pricing's duration row — so the notice
-cron's math stays unit-agnostic. And **the deposit's two truths** stay
+cron's math stays unit-agnostic. **The funding split shape** is the
+fourth: at lease birth the unit decides how the money is carved — one
+split per unit for UNITS policies, one global split for AMOUNT policies,
+ADVANCE no special case beyond its INSTALLMENT type (6.0's derived-shape
+law). And **the deposit's two truths** stay
 honest (Part 6): the balance counts in the policy's unit, while the
 *frozen amount in currency* — units × the rent at the lease's pricing
 version — is computed at lease birth and never re-derived, because escrow
@@ -1055,7 +1237,10 @@ from its location; when the owner sets a value, the applicable standard is
 the policy matching that state — falling back to a stateless (all-states)
 policy when no state-specific one exists, so the admin can publish a global
 default and override it per state where the world differs (currency,
-regulation, market norms). A state-specific row *exists but is disabled*
+regulation, market norms). This fallback chain only ever runs for a
+property whose location has *resolved*: a location failure is not a pass
+to the stateless tier, it is a hard stop of the whole property (the
+strange case below — close and stop everything, the operator's ruling). A state-specific row *exists but is disabled*
 treats as absent and falls through to the fallback — a paused local standard
 must not silently become a stricter-than-nothing wall; if no standard
 resolves at all, an optional policy simply has no bound and a mandatory one
@@ -1081,9 +1266,14 @@ overwrite, and logs every state it touched.
 The owner, editing a pricing, sees the policies applicable to their
 property's state and entity/type context: each with its bounds, its mandatory
 flag, its description and documents, and — if already set on this pricing —
-their current value. Setting or changing a value inside the bounds is a
+their current value. **Mandatory ones are already set**: Part 3.2's
+auto-creation birthed them at the policy's minimum, so the owner's screen
+opens with compliant numbers instead of empty required fields — the whole
+point of the ruling — and the owner lifts them to reality within bounds if
+the market demands more. Setting or changing a value inside the bounds is a
 versioned, logged act; setting one outside is refused with the bounds quoted;
-leaving a mandatory one unset blocks publication; changing it later re-runs
+a mandatory value missing only where no default could exist (the admin never
+set a minimum) blocks publication; changing it later re-runs
 the same checks. Values are per-pricing, so a property with a monthly and a
 nightly pricing may carry four months' advance on the monthly and a different
 figure on the nightly — the standards are shared, the instances are
@@ -1095,8 +1285,11 @@ contextual.
 cannot be edited while paused, resume under re-enabling (with the
 grandfather/review rules of Part 3.2).
 
-**A policy made mandatory after values exist**: live values grandfather;
-missing ones block *new* publication, flagged for completion on next edit.
+**A policy made mandatory after values exist**: live values grandfather,
+and every applicable pricing that was missing the value receives the
+auto-created row at the policy's minimum (Part 3.2's backfill) — the flip
+eases into place rather than blocking; only a mandatory policy with no
+admin minimum still blocks, flagged for completion on next edit.
 
 **Changing a value's pricing's type** (monthly becomes weekly): the unit
 context of count-kind values changes meaning under it — the plan refuses a
@@ -1106,10 +1299,23 @@ re-interpretation this design exists to prevent. The owner removes or edits
 the values first, visibly.
 
 **Two states, one property**: impossible by construction — one location
-resolves to one state — but a property whose location fails to resolve (bad
-external reference) has no state: it sees only stateless policies, and
-state-specific standards simply do not apply to it until the location
-resolves. The plan never guesses a state.
+resolves to one state — and a property whose location fails to resolve
+(bad external reference) gets **closed and stopped, everything** — the
+operator's ruling, which kills the softer reading this paragraph once
+carried. There is no limping along on stateless policies, no "state-
+specific standards simply do not apply until the location resolves" middle
+ground: an unresolvable location means the property has no state, and a
+property with no state has no world to price, publish or visit in, so the
+machine halts it — off the market, publication refused or revoked, new
+visit requests refused, new lease births refused, no value setting, no
+auto-creation, every state-dependent act refused — until the location
+resolves and the chain runs again. The plan never guesses a state, and it
+never substitutes a stateless one either; the only failure mode offered is
+stop. Contracts already alive are the one exception the plan's own money
+laws dictate: a lease born before the failure keeps running on its
+frozen, birth-time standards (frozen amounts are frozen, 6.1) — stopping
+means no *new* business and no *re*-derivation, never the destruction of
+money custody that is already decided.
 
 **The same policy valued twice on one pricing** is one row, not two: the
 pair (pricing, policy) is the identity of a value, and re-setting it edits
@@ -1122,20 +1328,22 @@ duplicates.
 
 ## 5.0 The frame: non-subscription, service-owned money, two parties and an owner
 
-Visits are declared a **non-subscription module**. In guard terms this has a
-precise meaning, not a vibes-based one: the subscription guard only ever
-counts *initiating* operations, and visit requests and visit payments
-categorically are initiating operations — so if a plan limit were ever bound
-to the visit family, the guard would begin counting them and the "non-
-subscription" promise would break silently. The promise is therefore kept by
-construction: **no plan feature is ever bound to the visit activity family**,
-so the subscription guard's third escape hatch (no bound feature means
-unlimited) keeps visits free of plan quotas forever, regardless of which plan
-a visitor is on. Rate limits, by contrast, remain available: the rate-limit
-guard falls open only while no rule row exists, and adding a row for visit
-operations is the admin's ordinary throttling tool if abuse appears. The
-permission rows and authority expressions still apply — non-subscription does
-not mean unguarded; it means the *quota* dimension is deliberately empty.
+Visits are a **non-subscription module** — and the operator's correction
+gives that phrase its exact guard meaning: **all guards are implemented on
+all methods** — every visit operation passes through the same guard stack
+as everything else, no method exempt — and **what decides whether
+subscription, rate limits, and every other guard dimension *applies* is
+the existence of a row or not**. For visits that means: no plan-feature
+row is bound to the visit activity family, so when the subscription guard
+runs on a visit method it finds no bound feature and there is nothing to
+count — quotas never bite, regardless of which plan a visitor is on. This
+is not an escape hatch and not a special declaration the guard honours —
+it is the ordinary row-existence law, the same law that makes rate limits
+real: a rule row for visit operations exists → the guard throttles; no
+row → it finds nothing to enforce, and adding a row is the admin's
+ordinary throttling tool if abuse appears. Permission rows and authority
+expressions apply on every method as everywhere — non-subscription means
+the quota dimension has no row, never that the module is unguarded.
 
 The money's ownership follows the PaymentOwnershipGuard doctrine: a visit
 payment is created through pay's internal server-to-server API, stamped with
@@ -1152,7 +1360,13 @@ seeded into pay's catalog for host domains; a split's address lands as the
 canonical (EXTERNAL, reference) cross-service pair — *which record it pays
 for* — and the platform stamp is what answers "whose reference vocabulary
 did this id come from", resolving inside notraius's own entities registry
-and never needing pay to know the word VISITS.
+and never needing pay to know the word VISITS. And the pair is **pure
+addressing, never a flow** — the operator's clarification: an EXTERNAL
+address is never escrow-bound, EXTERNAL marks *outside pay's own payment
+machinery* (the reference lives in the host's vocabulary), while every
+credit of visit money runs INTERNAL: the visitor's wallet fetched into
+escrow by the internal route (5.1). The address says which record; the
+money's lane is always internal.
 
 The parties are three, and the specification is adamant about which one money
 ultimately belongs to: the **visitor** (the prospect who requests and pays),
@@ -1174,18 +1388,36 @@ of business intent creates the visit row in its initial requested state and
 the payment for it — the payment's amount is the visit pricing's amount in
 the property's currency, its reference is the visit, addressed through the
 canonical (EXTERNAL, reference) pair exactly as the no-seeding law of 5.0
-declares, its platform is notraius — and the money lands **held**, not released: the escrow split exists
-from birth — the envelope carved and held — while its **destination is
-announced later**: visits ride pay's legacy settle lane (one funding, one
-settle announcing destinations), so the release credits whoever the
-settle act names, and nothing moves to anyone until the visit completes
-or cancels.
+declares (addressing only — the pair says *which record* the payment
+answers to, never how money moves), its platform is notraius — and the
+money lands **held**, not released: the payment is **internal all the way
+down** — pay's internal server-to-server route fetches the visitor's
+wallet into escrow in the same act that creates the row, wallet to escrow,
+one internal payment — and **the split is defined automatically at that
+same moment**: the destination is the property owner, the user id sitting
+on the property row *right there*, known and carved into the split as it
+is born. Nothing moves to anyone until the visit completes or cancels.
+(This kills the softer story this paragraph once told — "destination
+announced later, visits ride pay's legacy settle lane, the release
+credits whoever the settle act names": there is no late announcement and
+no destination-shouting settle for visits; one funding names its
+destination in the very act that creates it, because for visits the plan
+already knows who shall take the money — the property owner — "so we
+have him there", the operator's words.)
 
 The payment's deduplication key is (reference, currency) on pay's side and
 the absence of an idempotency key on the internal route means **the
 reference is the idempotency**: a request retried after a network hiccup
 finds the existing payment for this visit and currency instead of charging
-the visitor twice. The status-aware shape of that deduplication handles the
+the visitor twice. And the operator's warning governs what the reference
+may be: the reference is **the visit row's own id, minted per visit** —
+never the property id, because (property id, currency) is *not* unique:
+two separate visits to the same property in the same currency would share
+that pair and the second visitor's payment would wrongly converge on the
+first's. The visit id is unique per visit, so (visit id, currency) is
+unique per visit, and the key does exactly what a dedupe key must: fold
+the *same* visit's retries together while never touching a *different*
+visit's money. The status-aware shape of that deduplication handles the
 real strange case — a visit whose payment was refunded (cancellation,
 below) and whose visitor *requests again*: the old, dead payment no longer
 shadows a fresh charge, and the new request funds itself properly.
@@ -1217,7 +1449,8 @@ dedupe, never expired out from under its own funding.
 ### Strange cases — request
 
 **Currency edge:** the visit pricing has no currency of its own; it inherits
-the property's; a property whose currency changed is impossible (Part 4.1),
+the property's; a property whose currency could change is impossible (Part 4.1
+— currency is derived from the location and never editable),
 so the visit's currency is always well-defined.
 
 **The property was unpublished between browsing and requesting**: the request
@@ -1230,30 +1463,58 @@ from here pays it out by some rule).
 reference; deletion is in-use-refused anyway while the visit is live.
 
 **Double-click by the visitor**: one visit row, one payment, both attempts
-resolve to the same pair — the (reference, currency) dedupe is the answer.
+resolve to the same pair — the (reference, currency) dedupe is the answer,
+and it answers correctly precisely because the reference is the visit's
+**own id** (the operator's uniqueness ruling): the two attempts carry the
+same visit id and converge on one payment, while a second, genuinely
+different visit at the same property carries a different id and is never
+folded into the first's charge.
 
 **Owner never acts on a paid request**: a requested visit cannot hang
-forever — the plan expires unaccepted requests after a window, refunding the
-visitor in full (nobody performed, nobody keeps), and the expiry is a logged
-state change like any other. The exact window is configuration, settled at
-implementation; the *rule* is fixed here: silence never keeps money.
+forever — by **+24 hours** the visit must have reached PLANNING (the
+owner's stamp and the assignee's acceptance both inside the window), and a
+request still short of it is **expired**, refunding the
+visitor in full (nobody performed, nobody keeps): no stamp at all, or a
+stamp whose assignee never accepted — both roads die at the same line.
+Twenty-four hours is an **`.env`-bound** configuration value
+(environment-settable, never a hardcoded
+literal and never left open to "settled at implementation"), and the
+expiry is a logged
+state change like any other. The *rule* is fixed here: silence never keeps
+money; the number rides the environment.
 
-## 5.2 Acceptance: the owner stamps an identity and the visit becomes PLANNING
+## 5.2 Acceptance: an assignee is chosen, must accept — ASSIGNED, then PLANNING
 
-The owner (or the agent user on the visit) **confirms or cancels by adding
-their user id** — the act of acceptance is literally the stamping of an
-identity onto the visit — and on confirmation the status becomes
-**PLANNING**. This is the specification's mechanic, and it carries a real
+The owner (or the agent user on the visit) **assigns a user id** — the act
+of acceptance is the stamping of an identity onto the visit — and per the
+operator's correction the stamp is **not the owner's own id**: they name
+*a* user, an individual who must then accept in their own person. So the
+stamp does not jump the visit to PLANNING: the status moves REQUESTED →
+**ASSIGNED**, and the assigned user now holds the door — **accept** and
+the visit becomes PLANNING; **reject** and the visit goes back to
+REQUESTED (the stamp undone, the request live again for another
+assignment or the 24-hour clock of 5.1). ASSIGNED is a real stage of the
+flow — REQUESTED → ASSIGNED → PLANNING → CONFIRMED → STARTED → COMPLETED,
+with EXPIRED and CANCELLED as the terminal exits (STARTED is Part 5.3's
+own addition) — entered only at the
+right moment, right after the owner's stamp and before any planning edit;
+it is the stage where the responsibility record can still change hands
+(the strange case below), and it closes the moment the assignee accepts.
+This is the specification's mechanic, and it carries a real
 meaning: before the stamp, the visit is an unassigned paid request; the
-stamp says *this human is now responsible for it*, and responsibility is what
-enters the planning stage. Cancellation at this point — before acceptance —
-is the owner declining the request, and since the owner never engaged, the
-visitor's money returns **in full**: the 20% retention only exists (below)
-once the visit has been confirmed and committed to. The refund is driven
+stamp says *this human is now responsible for it*, the assignee's own
+acceptance says *I accept that responsibility*, and only the pair together
+lets responsibility enter the planning stage. Cancellation at this point —
+before acceptance — is the owner declining the request, and since the
+owner never engaged, the visitor's money returns **in full**: the 20%
+penalty only exists (below) once the visit has been confirmed and
+committed to. The refund is driven
 through notraius's internal door, the payment being notraius's own to move.
 
-Once stamped, PLANNING is where the two counterparties **edit the time of
-the visit until they are both ready** — and the specification gives the turn
+Once in PLANNING, **only the assigned user id and the visitor** edit the
+time of the visit until they are both ready — nobody else touches the
+schedule through this door (not the owner unless they are the assignee, not
+an admin, not the platform) — and the specification gives the turn
 rule with full precision, because it is a logs-driven rule:
 
 **When A edited it last — and we know through the logs — B can confirm or
@@ -1262,12 +1523,22 @@ edited, the entry records who changed what, so at any moment the system
 knows whose edit is *current* and whose *move* it is. The holder of the move
 (the counterpart of the last editor) has two legal actions: **confirm the
 current time** (accepting the other's proposal) or **edit it again**
-(countering with their own). The last editor has no move — they proposed,
-they wait; they cannot confirm their own proposal, because confirmation by
-the proposer is not agreement, it is self-echo. This creates the alternating
-rhythm the specification describes: propose, counter, counter, confirm —
-each edit flips the move, each confirmation ends the stage. When the
-counterpart confirms, the status becomes **CONFIRMED**.
+(countering with their own) — and the move-holder's actions are never
+time-boxed. The last editor, however, is **not locked out** — the operator's
+structural correction to the old "they proposed, they wait": they may edit
+again, refine their own proposal, **but only up to 30 minutes after their
+own last edit**, an **`.env`-bound** variable. Inside that window a re-edit
+is legal and rolls the window forward from the new edit; the moment it
+closes, that move is spent — they wait for the counterpart, and they still
+cannot confirm their own proposal, because confirmation by the proposer is
+not agreement, it is self-echo. So the rhythm the specification describes
+survives with the correction folded in: propose (re-propose freely for 30
+minutes, then hold), counter, counter, confirm — each qualifying edit flips
+whose window it is, each confirmation ends the stage. When the
+counterpart confirms, the status becomes **CONFIRMED**. And the schedule
+being edited is exactly the visit's time fields (from-date-time and kin)
+— only the assigned user and the visitor ever touch them, as the stage
+above declares.
 
 Why logs and not a "pending edit" field: the specification wants the history
 itself to be the source — who edited, when, what the time was before and
@@ -1282,28 +1553,46 @@ and the turn rule continues from whichever committed second.
 ### Strange cases — PLANNING
 
 **The counterpart never moves**: the other party holds the move and vanishes.
-Planning cannot stall forever — the same expiry philosophy as unaccepted
-requests applies with a longer window, and expiry of a PLANNING visit
-returns the visitor's money in full (the visit never got confirmed; nothing
-was committed to). Silence never keeps money is the module's second law.
+Planning cannot stall forever — and the operator's clocks make that exact,
+two fences both counting from the visit's creation. The **first fence at
++24 hours** (`.env`-bound, 5.1): by then the visit must have reached
+PLANNING — the stamp and the assignee's acceptance both inside the window —
+or it expires there, refunding the visitor in full. The **last fence at
++72 hours**: *any* visit created at +72 hours that is still not CONFIRMED
+is considered **EXPIRED and the money refunded back to the user**, a sweep
+enforced, covering every pre-confirmation stall — a silent REQUESTED, an
+ASSIGNED nobody accepted inside the first fence, a PLANNING where both
+parties went quiet — because the visit never got confirmed, nothing was
+committed to, and the whole payment returns. The birth clock is spent on
+first CONFIRMED: a later reschedule re-entering PLANNING never re-arms it,
+the commitment already existing. Silence never keeps money is the module's
+second law.
 
-**Edits are always available to the move-holder only**: an edit attempt by
-the last editor is refused with the turn state in the error — not
-mysteriously rejected, but explained ("you edited last; they must confirm or
-counter"), because a turn-based flow whose users do not understand the turn
-degenerates into support tickets.
+**The last editor tries to edit again**: legal **inside** the 30-minute
+re-edit window (`.env`-bound) since their last edit — and it rolls that
+window forward from the new edit — and refused **outside** it, with the
+turn state in the error, not mysteriously rejected but explained ("your
+re-edit window closed; they must confirm or counter"), because a turn-based
+flow whose users do not understand the turn degenerates into support
+tickets. The move-holder's confirm-or-counter never wears this clock; only
+self-re-edits do.
 
 **Rescheduling reuses this stage** (below): a confirmed visit that needs a
 new time re-enters PLANNING with the same turn rule, the same logs, the same
 referee — one mechanic, two entries.
 
-**The owner stamps a different user id on re-acceptance** (the agent hands
-the visit to a colleague): allowed before planning edits begin; the stamp is
-the responsibility record, and responsibility can transfer while the visit is
-still unconfirmed. After CONFIRMED, the counterpart is fixed — changing who
-plans a confirmed visit is a reschedule-shaped act, not a silent edit.
+**Re-stamping a different user id (the agent hands the visit to a
+colleague)**: the flow is now REQUESTED → ASSIGNED → PLANNING → CONFIRMED,
+and the stamp's rule is exact — changing which user id is assigned is
+possible **only in the ASSIGNED stage**, the right moment: the assignee has
+not accepted yet, so responsibility has not attached and the record may
+still be rewritten. The moment acceptance lands and PLANNING begins, the
+counterpart is fixed — no re-stamping through PLANNING and **never up to
+CONFIRMED**; changing who plans a confirmed visit is a reschedule-shaped
+act, not a silent edit, and after ASSIGNED a plain stamp edit simply has no
+door.
 
-## 5.3 CONFIRMED, the visit itself, and mutual assessment
+## 5.3 CONFIRMED → STARTED → COMPLETED: the visit itself, and mutual assessment
 
 CONFIRMED means the time is agreed and the visit will happen (physically or
 virtually). After the visit, the specification's sequence is strict and
@@ -1312,51 +1601,148 @@ backwards-and-forwards by nature: **each party assesses the other**, and
 confirm visits, they must absolutely assess each other first, then they click
 on the confirm-visit button, and things get settled."
 
+### STARTED — the operator's new stage, right before COMPLETED
+
+The flow gains a stage: **REQUESTED → ASSIGNED → PLANNING → CONFIRMED →
+STARTED → COMPLETED**, with EXPIRED and CANCELLED as the terminal exits.
+STARTED exists because the platform must know *whether the visit really
+started* — the post-visit sequence cannot judge anyone without an evidence
+act first. When the visit's time arrives, **one party marks the visit
+STARTED** — the claim that it is happening. The other party then has
+**10 minutes** (`.env`-bound) to **confirm it as started**:
+
+- confirmed inside the window → STARTED stands, and the visit walks into
+  its assessment phase below;
+- not confirmed inside the window → **the status goes back to EXPIRED and
+  the escrow is released** — and the no-show laws below fire against the
+  one who was not there ("we need to know if it really did start, and the
+  one not there shall pay for it");
+- **nobody marks STARTED at all** by the visit's planned end → nobody
+  claims the visit happened, so the visit also goes **EXPIRED**, the
+  visitor's money returns in full, and **no penalty is filed against
+  anyone** — no claim means no provable absence to bill, and the plan
+  will not manufacture a culprit out of mutual silence.
+
+The start-confirmation window, the assessment window and the auto-complete
+hour are all `.env`-bound, the operator's instruction; and the STARTED act
+is logged to the instant — who marked, who confirmed, at what time —
+because every penalty below reads that log as its evidence. The cancel and
+reschedule doors also close at STARTED: the time for changing plans was
+before the visit began; every exit from STARTED is one of the three above
+or the confirm path below. STARTED's marker is a *claim*, and the
+counter-signature discipline is what keeps claims honest: a party who was
+actually present confirms inside the window and defeats any framing; a
+party who was actually absent cannot confirm — and correctly pays; and
+because presence cannot be sensed from the server, the estate's contest
+path stands behind every penalty: a wronged party opens the support
+ticket, brings evidence, and the admin adjudicates — filed judgments stay
+filed unless the admin's own voiding law says otherwise (6.3's precedent).
+
+### The no-show laws — the one not there pays for it
+
+EXPIRED at STARTED means the held money unwinds — the split created for
+the visit is refunded back to the visitor, the payer (nobody completed the
+service, nobody keeps) — and then the penalty, depending on **which party
+was not there**, decided by the STARTED log:
+
+**The counterpart (the assigned user id) was not there**: the visitor
+marked STARTED and the counterpart never confirmed inside the window. The
+counterpart's user id receives **a negative assessment on all axes**, and
+it **propagates back to the property owner as well — he also bears that
+responsibility** (his representative's absence, or his own). Reputational,
+not monetary: the owner's side failed to show and the platform records it
+against both ids — the visitor keeps no bill for someone else's absence.
+
+**The visitor was not there**: the counterpart marked STARTED and the
+visitor never confirmed inside the window. The visitor receives **a bad
+review — the all-axes negative assessment — and pays the property owner a
+share of the fees**: the visit's split is refunded back to the visitor,
+and then **the system creates a new payment** carrying its own split to
+the property owner, whose **amount is 40% of the visit's fees**, with a
+**reason field customized to say exactly what this is** — the
+after-started no-show penalty, worded plainly enough that nobody reading
+the ledger mistakes it for a generic charge — created at the no-show
+determination. Flagged for the operator, one sentence to settle: his own
+wording carries both figures — "pays the property owner 20% of the fees"
+and "the amount is 40%" — and the plan's default is **40%**, the later
+and more mechanical of the two (added to the decision list at the end).
+
+The assessments the no-show act files are automatic — filed with the
+resolution act itself, like every auto-assessment in this estate — and
+they close the visit's judgment door: an EXPIRED no-show visit collects
+no further assessments; the penalty *is* the judgment.
+
 The assessments are mutual and cross-wired: the visitor assesses the
-property/owner side, the owner side assesses the visitor. Each assessment is
-its own record, each is submitted once (re-submission before the other side
-acts is an edit of one's own assessment, versioned and logged; after the
-visit is confirmed it is frozen — a confirmed visit's assessments are
-history). The **confirm-visit button is gated on both**: one assessment
-without the other means the button does not exist for either party — the
-gate is symmetric, so neither side can rush the other by confirming early.
+property/owner side, the owner side assesses the visitor, and they may be
+filed **only while the visit stands STARTED — from the start mark until
+60 minutes after the visit's validity end (its to-date-time)**, an
+`.env`-bound window; when it closes, the assessment door seals shut for
+that visit forever, whichever way the visit ends. Each assessment is
+its own record, each is submitted once (re-submission before the other
+side acts — and before the window closes — is an edit of one's own
+assessment, versioned and logged; the moment the visit becomes COMPLETED
+by any path the assessments are frozen — history). The **confirm-visit
+button is gated on both**: one assessment without the other means the
+button does not exist for either party — the gate is symmetric, so
+neither side can rush the other by confirming early — and it stays gated
+*only while the window is open*; the hour, below, is what happens when
+the window shuts on an incomplete pair.
 
 When both assessments exist and someone presses confirm, the visit completes
 and **the money moves from escrow to the owner of the property — not the
-user id on the visit, the owner's account on the property**. One settle, one destination, the full held amount: the settle act names
-the property's owner at the settle moment (the flagged default,
-decision point 4 — the property is what was paid for) and pay's release
-credits exactly that name, because the visit's split was born *held* —
-its destination is the settle act's announcement, never a live owner
-lookup by pay. The visit's status becomes completed,
+user id on the visit, the owner's account on the property**. One settle, one destination, the full held amount: pay's release credits the
+destination the split was **born with** — the property owner, named on
+the split at payment creation (5.1's ruling: the split is defined
+automatically, we have him there) — never an announcement shouted at
+settle time, never a live owner lookup by pay. This settles decision
+point 4: the born destination governs, so an owner change mid-visit does
+not rewrite a funded split — money's destination is born, not announced,
+the same discipline the lease matrix lives under (6.4) — and the property
+is still what was paid for, paid to the owner it had when the money
+arrived. The visit's status becomes completed,
 the payment becomes settled, and — because pay never allows a refund after
 settle — this is a one-way door: everything below (cancellation) is
 therefore only thinkable *before* this moment, which the state machine
 enforces by making cancel impossible once settled.
 
-The assessment-then-confirm ordering is what makes the escrow honest: the
-money cannot be released while either party still owes their judgment, so
-neither side can skip their half and take the money — and neither side can
-be *forced* to judge before the other has, because the button waits for both.
+The assessment-then-confirm ordering guards the escrow **while its window
+is open**: while the clock runs, the money cannot be released while
+either party still owes their judgment — neither side can skip its half
+and take the money, neither side can be *forced* to judge before the
+other has, because the button waits for both. And then the operator's
+deliberate crack in that guarantee: **when the window ends, the machine
+stops waiting.** If by **one hour past the visit's planned end** (60
+minutes, `.env`-bound — the same instant the assessment door closes) the
+visit has not been confirmed, the status **silently passes to COMPLETED**
+and the **escrow is released** to its born destination; nobody needs to
+have pressed anything, and nobody can file an assessment for that visit
+ever again. The guarantee converts from "no release without judgment"
+into "judgment, or the hour" — and the dispute door (the support ticket,
+below) remains for whoever the silence cost: the late judgment's author
+opens a ticket, the admin weighs it, filed judgments stay filed. Silence
+never keeps money; here silence can neither hold it hostage nor rescue it
+from release.
 
 ### Strange cases — assessment and settlement
 
-**One party never assesses**: the visit sits CONFIRMED with money held and
-an incomplete pair — the specification's answer is the support ticket (below)
-and the admin's decision; the plan adds no silent auto-confirm, because
-auto-settling without a missing assessment would break the very guarantee the
-gating exists to provide. The window-and-force question (does an assessment
-ever expire into admin-forced completion?) is explicitly a decision point
-for the operator — the plan's default is: no automatic force; disputes are
-human decisions, matching "admin decides".
+**One party never assesses**: the visit sits STARTED with money held and
+an incomplete pair — and the operator has now supplied the force the old
+reading refused: the assessment window (60 minutes past the visit's
+planned end, env-bound) closes on the pair, the visit **silently becomes
+COMPLETED**, the escrow releases, and the door seals. What survives is
+the contest: the party whose silence was costlier — or who never got to
+speak — opens the support ticket (below), and the admin adjudicates after
+the fact; the plan's *pre*-hour default of "no silent auto-confirm" is
+overturned by the operator's hour, and only the post-hour dispute path
+remains human.
 
-**The property changed owner between request and settlement**: settlement
-pays the owner *as of the settle moment* — the property's current owner id —
-because the specification's rule is about the property's ownership, not a
-snapshot frozen at request time. If the operator prefers the request-time
-owner (the person who actually showed the place), that is a one-line
-decision-point note; the plan defaults to current-owner for the same reason
-the rule exists at all: the property is what was paid for.
+**The property changed owner between request and settlement**: settled by
+the visit-money ruling of 5.1/5.3 — the split was **born** naming the
+owner it had when the money arrived, and the born destination governs; an
+owner change mid-visit never rewrites a funded split (money's destination
+is born, not announced — the same discipline the lease matrix lives
+under, 6.4). The old "current owner at the settle moment" default is
+retired with the legacy settle-announces-destinations lane it rode on.
 
 **The visit's counterpart (user id) is not the owner**: settlement ignores
 them entirely — no share, no fee, no routing. Their compensation, if any, is
@@ -1372,13 +1758,19 @@ the raw material of each party's standing; a contested assessment is
 therefore also a reputation question, which is another reason disputes go to
 the admin rather than being auto-resolved.
 
-## 5.4 Reschedule and cancel: the 24-hour rule and the 20% retention
+## 5.4 Reschedule and cancel: the 24-hour rule and the 20% penalty
 
 The specification's final scenario — things going awry — has two named
 instruments and one money rule.
 
 **Reschedule management** exists inside CONFIRMED: either party may request
-a new time, and the visit
+a new time — **the act must happen at least 24 hours before the visit's
+planned start (its validity's from-date-time)**, an **`.env`-bound**
+horizon like every clock in this module (the operator's ruling: this line
+is configuration too) — and **each party may initiate a reschedule only
+once per visit**: one per person per visit. Confirming your counterpart's
+reschedule does not consume your own request; once you have used yours,
+your request door closes for that visit and only theirs remains. The visit
 re-enters the PLANNING stage with the identical turn rule (last editor's
 counterpart confirms or counters) — confirmed visits do not get a second,
 simpler editing mechanic; they get the same referee. A reschedule that
@@ -1390,10 +1782,14 @@ explicitly.** A reschedule moves no money (the payment stays held, untouched,
 no split, no refund, no fee), files no assessment (neither party gains nor
 loses reputation for merely changing the time), and carries no penalty of any
 kind — it is the penalty-free alternative the specification insists on
-alongside the penalties below ("still they can reschedule"). Everything
+alongside the penalties below ("still they can reschedule"). And it is
+once per person per visit — the gate above — so "clean" never becomes
+"endless": each side gets one free, mutual, clean time change and then
+the agreement stands. Everything
 punitive in this section attaches to *cancellation* only; the moment a flow
 charges money or reputation for a mere time change, the module has broken its
-own contract. The turn rule itself is the reschedule's only gate: both
+own contract. The turn rule itself is the reschedule's only gate after the
+horizon is cleared: both
 parties must agree to the new time through the confirm cycle, and that
 mutual agreement is all the discipline a reschedule needs.
 
@@ -1401,37 +1797,73 @@ mutual agreement is all the discipline a reschedule needs.
 specification: when already in CONFIRMED status and 24 hours before the
 visit, they can cancel — and upon cancelling, they get their money back
 **but 20% of the amount goes to the property owner**. The reading the plan
-takes (and flags for confirmation, since the phrasing admits both directions):
-cancellation is available **while the visit is still at least 24 hours in
-the future** — the standard "free cancellation until one day before" shape —
-and once inside the final 24 hours the self-serve door closes: too close to
+takes: cancellation is available **while the visit is still at least the
+horizon in the future** —
+and once inside the final horizon the self-serve door closes: too close to
 the visit for a replacement booking to be plausible, so the visit proceeds
 or goes to dispute (the support ticket, below). The exact boundary instant
 compares the visit's planned start against now, in absolute time, so "24
-hours before" is a moment on the calendar, not a business-day approximation;
-a visit exactly 24 hours away is still cancellable — the door shuts the
+hours before" is a moment on the calendar, not a business-day
+approximation — and the operator's ruling on that line: **the boundary is
+`.env`-bound**, the 24 hours a default the environment can set, never a
+hardcoded constant (the same configuration family as the request clock, the
+start-confirm window and the assessment hour); the absolute-time comparison
+and the door's shape stay fixed, the number rides the environment;
+a visit exactly on
+the horizon is still cancellable — the door shuts the
 first second inside that line.
 
-**The money split on cancellation**: the held payment is settled with two
-destinations — **80% back to the visitor, 20% to the property owner** — the
-visitor "gets their money back" as the overwhelming majority, and the owner
-keeps a fifth as compensation for a slot they can no longer fill at the last
-responsible moment. Both legs are declared in one settle (one credit per
-beneficiary, exact sum, held money moving — all of pay's split facts
-honoured), and because this settle *is* the terminal act, the payment
-becomes settled and the no-refund-after-settle rule is never approached.
-The 20% is a **fixed share of the visit fee**, not a sliding scale, not a
-tiered penalty — the specification gives one number and the plan keeps it.
+**The operator's correction: there is no free shape inside CONFIRMED.**
+His words: *"It's not this … since up until the moment the visit entered
+the CONFIRMED stage, CANCELLATION is possible only with penalty. That's as
+simple as it is."* The plan reads it as: the "standard free cancellation
+until one day before" framing **dies at the CONFIRMED threshold** — from
+the moment the visit enters CONFIRMED, every cancellation carries the
+penalty; the only penalty-free door in the module is the pre-CONFIRMED one
+(below: full refund, nobody was committed to anything, no slot was held in
+earnest). The horizon line itself survives as configuration — the operator
+confirmed the boundary is `.env`-bound — so the penalty door is open while
+the visit stands at least the horizon away and shuts inside it. One
+residual reading is flagged, one sentence to settle: if "up until the
+moment the visit entered the CONFIRMED stage" was meant literally as a
+*pre*-CONFIRMED penalty — charging even a negotiator to walk away — the
+plan's default says no (pricing a cancelled negotiation taxes people for
+merely talking, the reasoning below), and the flag exists so the operator
+can flip the pre-confirm door from free to paid if that was the intent.
+
+**The money on cancellation: full refund, then a direct penalty payment.**
+The operator reframes the old single-settle 80/20 — that shape is gone.
+Cancellation inside CONFIRMED runs as two movements: **first the held
+payment is refunded to the visitor in full** — the whole escrow returns,
+one credit, the visitor gets their money back completely — and **then the
+system creates a new payment**: a **direct** payment with **no escrow
+anywhere in its path** (a straight wallet-to-wallet move — the penalty as
+a fact, not as custody), funded by the canceller's wallet, addressed to
+the property owner, whose **amount is 20% of the visit fee**, and whose
+**split reason describes the penalty and such things completely** — a
+customized, self-explanatory reason naming who cancelled, which visit and
+why this 20% exists, never a generic label. The 20% is a **fixed share of
+the visit fee**, not a sliding scale, not a tiered penalty — the
+specification gives one number and the plan keeps it. Because refund and
+penalty are two movements rather than one split settle, the visit
+payment's terminal act is the *refund* (it returns whole, and pay's
+no-refund-after-settle rule is never approached — the refund happens
+before any settle), while the penalty is its own payment row with its own
+reason — legible in the ledger for exactly what it is: compensation for a
+slot the canceller took off the market at the last responsible moment,
+named in its own reason field instead of hiding inside a split.
 
 **The reputation penalty travels with the money penalty.** The operator's
 rule is explicit and two-directional: **a cancellation of a CONFIRMED visit
 files an assessment of 1 on every axis against the cancelling party**, in
 addition to whatever the money does. When the **visitor** cancels after
-CONFIRMED, they lose 20% of the fee *and* take an all-axes-1 assessment —
+CONFIRMED, they eat the **full refund plus the direct 20% penalty payment**
+*and* take an all-axes-1 assessment —
 money and standing, both. When the **user-id side** (the owner's
 counterpart on the visit) cancels, they take the all-axes-1 assessment —
 the bad review is the price of breaking a confirmed commitment from their
-side — while the money rules of this section (the 80/20 split, or the
+side — while the money rules of this section (the full refund plus the
+direct 20% penalty payment, or the
 full-refund owner-fault cases below) continue to apply unchanged. The
 assessment is **filed automatically inside the cancellation transaction**,
 on behalf of the non-cancelling party, against the cancelling party: the
@@ -1453,21 +1885,25 @@ priced worlds apart: change the time (free, mutual, clean) or break the
 commitment (paid, one-sided, judged). The penalty exists to push the parties
 toward the first door, which is exactly why it must never leak into it.
 
-**Who may cancel**: the specification's "they" covers the visitor (the payer
-— the natural reading of "they get their money back"). The plan extends it
-symmetrically — **either party may cancel before the 24-hour line, with the
-same 80/20 split** — because a symmetric door is simpler to reason about and
-the penalty's purpose (compensating the owner for a lost slot) holds whether
-the slot was lost by the visitor's plans or the owner's. On the *reputation*
-side the symmetry is no longer the plan's guess: the operator has ruled that
-**both directions carry the all-axes-1 assessment** — visitor cancels,
-visitor is judged; user-id cancels, user-id is judged. What remains open for
-review is only the *money* symmetry: the operator may prefer visitor-only
-cancellation with an owner-initiated cancel refunding the visitor in full
-(no money penalty for the owner's own breach — though the assessment still
-lands, since the operator attached it to the act of cancelling, not to who
-pays). The plan's default is the symmetric 80/20; the flag is here so the
-review can settle it in one sentence.
+**Who may cancel**: the operator has killed the plan's symmetry outright —
+this door is **the visitor's alone**, and only **already in CONFIRMED**
+(his words: *"it's only possible when the cancelling party is the visitor
+and status is already CONFIRMED"*). The specification's "they" was the
+payer all along, and the plan no longer extends it: the visitor cancels
+inside CONFIRMED while the visit still stands at least the horizon away,
+pays the **full refund plus the direct 20% penalty payment**, and takes
+the all-axes-1 assessment. The owner's side gets **no self-serve cancel
+door on a confirmed visit** — they cannot break the commitment by button;
+their ways out are the owner-fault cases below (unpublish, suspend,
+cannot host: visitor refunded in full, no penalty payment), staff action
+(full refund, no assessment), the clocks (silence never keeps money), or
+the ticket — and an owner's counterpart who simply refuses to cooperate
+is exactly what the dispute door is for. The *reputation* symmetry the
+operator ruled earlier stands in its own place, untouched by this: **both
+directions carry the all-axes-1 assessment when a confirmed visit is
+broken** — visitor cancels, visitor is judged; an owner-fault break
+judges the owner's counterpart — attached to the act of breaking, not to
+who pays. Decision point (2) in the list is closed with it.
 
 **Cancellation before CONFIRMED** (requested, or in planning) is a different
 door with different money: no commitment has been made, no slot has been
@@ -1480,8 +1916,9 @@ simply cannot host — the visitor's money returns in full regardless of the
 24-hour line when *the owner* is the reason the visit cannot happen: the
 money penalty exists to compensate owners for visitor-side cancellations,
 never to reward an owner for cancelling their own booking. A property that
-goes dark with visits inside the final 24 hours therefore settles to the
-visitor 100%. The reputation penalty, however, still follows a *voluntary*
+goes dark with visits inside the final horizon therefore returns the
+visitor's money **in full with no penalty payment raised** — the refund
+is total and the 20% act never fires. The reputation penalty, however, still follows a *voluntary*
 owner-side cancellation of a confirmed visit — the owner's counterpart eats
 the all-axes-1 review for breaking the commitment, exactly as the operator
 specified for the user-id direction. The one exception the plan draws: a
@@ -1493,46 +1930,66 @@ happen and silence never keeps money.
 
 ### Strange cases — cancel and reschedule
 
-**Exactly-24-hours**: at-least semantics as stated — cancellable at exactly
-24 hours out, not one second inside.
+**Exactly on the horizon**: at-least semantics as stated — cancellable at
+exactly the line, not one second inside; and the line itself is
+`.env`-bound (item 19), so "exactly 24 hours" is "exactly the configured
+horizon".
 
-**Reschedule then cancel**: the cancellation clock measures the *current*
-confirmed time; rescheduling closer to now tightens it (a reschedule inside
-24 hours, if the operator allows it at all, requires both parties' agreement
-precisely because it moves the visit past the cancellation line for both —
-the turn rule's confirmation *is* that mutual agreement, so a reschedule
-inside the line is legal only through the full confirm cycle, never as a
-unilateral edit).
+**Reschedule then cancel**: reschedule cannot even begin inside the
+horizon (its own gate measures the act against the visit's current planned
+start), so the old escape — rescheduling closer to now to dodge or tighten
+the clock — has no floor to stand on: inside the line, *neither* self-serve
+door works, cancel and reschedule alike, and the visit proceeds or goes to
+the ticket. A reschedule performed legally may still land its new time
+inside the line — both parties agreed to a near visit through the full
+confirm cycle — and from that instant both doors read the *new*
+from-date-time and are already shut: an agreed near-visit is an agreed
+no-door-visit, with the dispute ticket as the only remaining exit. The
+cancellation clock always measures the current confirmed time.
 
-**A cancelled visit's assessments**: none exist yet (assessment follows the
-visit); if a visit was cancelled after assessments began — impossible in the
-normal order, but defensively: cancellation is refused once both assessments
-exist and the confirm button is live, because at that point the visit is one
-click from completion and the money's destination is already decided.
+**A cancelled visit's assessments**: none exist yet (assessment begins
+only at STARTED); if a visit was cancelled after assessments began —
+impossible in the normal order, but defensively: **cancellation is refused
+the moment the visit has STARTED** — the doors close at the start mark
+(5.3), because from STARTED on, the visit is happening and the money is
+already under the no-show and hour laws, not the cancel rules.
 
 **Cancel racing confirm**: first transaction wins; the state check inside
 the transaction decides — a settle that has begun makes the cancel find a
 settled payment and refuse; a cancel that has begun makes confirm find a
 cancelled visit and refuse. No split-brain, no half-settled money.
 
-**The 20% leg's arithmetic**: 20% of the amount, rounded to the currency's
-precision with the visitor's leg absorbing the rounding remainder so the two
-legs always sum to exactly the held amount — a penny's difference must never
-make a settle fail.
+**The penalty payment's arithmetic**: 20% of the visit fee, rounded to
+the currency's precision — a single figure on its own payment row, so
+there is no two-leg sum to keep honest any more: the refund leg is the
+held amount in full (exact by construction), and the penalty leg is its
+own direct payment; a penny's difference can never make either movement
+fail.
 
-**Who receives the 20% when the property changed hands**: the current owner,
-same rule as final settlement — the property's owner id is the constant the
-module pays toward.
+**Who receives the 20% when the property changed hands**: the owner as of
+the cancellation act — the penalty payment is **new money**, born at the
+cancel, and new money takes the owner it is born to (6.4's deed law: new
+money, new truth); the born-destination discipline governs the visit's
+*escrow*, not a penalty raised after the fact.
 
 ## 5.5 Disputes: support tickets and the admin's decision
 
 "Things going awry — they just create a support ticket. Admin decides." The
 module does not invent a dispute engine; it uses the estate's existing
-support-ticket machinery, whose ownership semantics are already correct for
-this use: a ticket belongs to its creator, staff see everything, and the
+support-ticket machinery, whose ownership semantics the operator has
+sharpened for this use: a ticket belongs to its creator, staff see
+everything, and — the operator's addition — **all parties involved in
+something can see the support ticket created for that thing**: a visit's
+visitor, its counterpart and the property owner all see a ticket opened on
+their visit (a dispute about a thing concerns everyone attached to that
+thing, not just whoever typed first), that party circle computed from the
+ticket's reference id — the reference resolves the entity, the entity
+resolves who its parties are — with staff still above the whole estate.
+The
 ticket's entity binding ties it to the visit record so the admin reading the
 dispute sees exactly which visit, which payment, which assessments, which
-turn-history it concerns. Either party may open a ticket on a visit;
+turn-history it concerns, and so every party's view resolves to the same
+dispute record. Either party may open a ticket on a visit;
 the admin's decision is exercised through the ordinary doors available at
 the time — a not-yet-settled visit's money can be settled to one side or
 refunded by admin action through the internal payment routes (notraius's own
@@ -1546,7 +2003,14 @@ Tickets inherit the whole estate's discipline around them: the creator and
 assignee are parties (OwnershipGuard's domain check), staff are above it,
 rate limits apply to ticket creation like any initiating operation, and the
 ticket's own lifecycle (open, answered, resolved) is the shared module's
-concern, not this plan's.
+concern, not this plan's. And the operator's check runs **at creation, on
+the reference id**: when a support ticket is created, the reference it
+cites is ownership-checked against the creating party — the party trying to
+create the ticket must resolve as a party of that reference (or staff)
+*before the ticket exists* — which lands, as the operator notes, squarely
+in the shared package: the ticket system's creation path must ask "does
+this caller own a piece of what this reference names", not merely record
+who pressed the button.
 
 ### Strange cases — disputes
 
@@ -1559,10 +2023,16 @@ independently (tickets never freeze state machines); if the admin later rules
 against the cancellation's outcome, the remedy is a new money movement, not
 an undo — money history is append-only.
 
-**Anonymous or third-party tickets about a visit**: refused — a visit ticket
-requires being a party to the visit (visitor, counterpart, property owner)
-or staff, enforced by the same ownership check the ticket system already
-implements.
+**Anonymous or third-party tickets about a visit**: refused **at
+creation** — the reference id is ownership-checked against the caller
+before the ticket is born: a visit ticket requires being a party to the
+visit (visitor, counterpart, property owner) or staff, enforced by the
+same ownership check the ticket system implements, applied to the party
+trying to create it against the reference they cite. And visibility runs
+on the same circle — **all parties involved in the referenced thing can
+see the support ticket created for that thing**: the ticket is nobody's
+private note when three lives are bound to its subject; staff remain
+above everything, and non-parties see nothing.
 
 ---
 
@@ -1578,7 +2048,7 @@ schema already makes: **the lease binds to a pricing, not to a property**.
 From `pricing_id` the lease derives everything at birth — the commercial
 cadence and its duration row (a month, a night, ten hours), the rent
 amount, the currency (the property's, inherited, never re-stated),
-`requires_conditions`, and through the property and its location the state
+`checkable`, and through the property and its location the state
 that selects the whole policy chain scoping the deposits. Nothing in the
 lease creation flow needs a settings screen, and the hotel case falls out
 for free: a nightly pricing with no monthly policy chain and no move-in
@@ -1588,26 +2058,48 @@ data, never by a second machine.
 **The money is born-allocated and release-on-demand** — the operator's
 ruling, shaped here as the module's financial law. At lease creation there
 is exactly one funding event: a single payment whose *entire deposit
-matrix* is born with it — one split per month of advance (every split
-addressed to the property owner, each with its own `(EXTERNAL, reference)`
-address, the month being its own reference so pay analytics reconciles per
-month). One hull note before it hardens into law: an ADVANCE priced as an
-**AMOUNT** is the same matrix with one fewer carving — its advance custody
-is a single gross split carrying the whole figure, its consumption walking
-pay's partial release (the reading is fixed in 6.4). One split per other
-deposit kind (SECURITY, ELECTRICITY — gross
-amounts, one split per type), and one held escrow over every split. The
-owner's wallet is credited nothing; the money sits in custody. From that
-moment the matrix never changes and nothing is ever carved late: the
-lease's financial life is a decided sequence of *which* escrow to release,
-*when* — a month of consumed advance released to the owner as rent here, a
-deposit returned to the tenant at settlement there — and the whole parked
-sum always reconciles to some combination of escrow states. Pay-side, this
-law already has a name: pay's per-split custody evolution (its own plan)
-carries the matrix create, the per-split release, the split-aware refund,
-and the funding word. Notraius drives all of it through the internal
-server-to-server routes, never through a user-facing pay route, exactly
-the fence the visits money already lives behind.
+matrix* is born with it — and **the split shape is derived from each
+policy's own `unit`, never hardcoded** (the operator's dynamic rule): a
+**UNITS-typed policy gets one split per unit of its policy unit** — an
+advance of four months is four splits, every split addressed to the
+property owner with its own reference so pay analytics reconciles per
+month — while **an AMOUNT-typed policy gets one global split** carrying
+the whole figure, whatever policy it is (SECURITY, ELECTRICITY, an
+amount-valued advance alike: one money-thing, one split). **ADVANCE is
+not a special case**: it is just a policy of type **INSTALLMENT** — the
+policy row's own type tells the machine it is a prepaid advance on
+installments and the unit tells it how the figure carves, so Part 6's
+machinery reads type and unit and needs no hardcoded ADVANCE branch
+anywhere; that is exactly the generality the operator is after.
+
+**No partial thing is done — one split is atomic.** One split maps to one
+unit of the policy's thing, and a split has exactly two fates: **fully
+refunded or fully released**, whole in one act, never fractionally drawn
+— the operator's correction to the shape this paragraph once carried
+("consumption walking pay's partial release" is dead; there is no partial
+release in this plan). One held escrow stands over each split — the
+custody marker over exactly that split — and the owner's wallet is
+credited nothing at birth; the money sits in custody. From that moment the
+matrix never changes and nothing is ever carved late: the lease's
+financial life is a decided sequence of *which* escrow to release,
+*when* — a month's advance split released whole to the owner as rent here
+(each unit split consumed whole inside its own period, 6.3/6.4), a deposit
+returned whole to the tenant at settlement there — and the whole parked
+sum always reconciles to some combination of escrow states.
+
+**And the `(EXTERNAL, reference)` pair on each split is an address, not a
+flow — the operator's warning against reading it as EXTERNAL money.** The
+pair *feels* like a payment whose flow is EXTERNAL; it is not: the lease
+payment's money is INTERNAL all the way down — the tenant's wallet into
+escrow through notraius's internal server-to-server routes, the same fence
+the visits money lives behind. EXTERNAL in the pair marks only where the
+*reference vocabulary* lives — outside pay, in notraius's own entities
+registry (5.0's no-seeding law) — it answers *which record* this split
+pays for, never how the money moves. Pay-side, this law already has a
+name: pay's per-split custody doctrine (its own plan) carries the matrix
+create, the whole-split release, the split-aware refund, and the funding
+word. Notraius drives all of it through the internal server-to-server
+routes, never through a user-facing pay route.
 
 **The property's states interlock with the lease's existence, per the
 operator's ruling.** Only an **ACTIVE** property can receive visits and
@@ -1615,23 +2107,43 @@ take on new leases; the moment a lease *exists*, the property becomes
 **LEASED** — no second tenant can race for the same asset, and while a
 lease lives the property takes no viewings either, because it is not the
 next lease's subject while it is someone's home. Visits already in flight
-when the flip lands — requested, planning, confirmed — walk the
+when the flip lands — requested, assigned, planning, confirmed — walk the
 owner-fault door of Part 5.4: the property cannot host what a tenancy now
 occupies, so the visitor's money returns in full, no 24-hour line, and no
-assessment is filed against anyone for a platform-state change. The
+assessment is filed against anyone for a platform-state change. A visit
+already **STARTED** is the one exception: it is *happening* — the platform
+does not teleport people mid-visit — so its own laws (the start-confirm
+window, the assessments, the hour) run it to its natural end, and only
+visits that have not started are walked out by the flip. The
 owner's unpublish door, for the same reason, is refused while the
 property is LEASED — a tenancy is the listing's living truth, and the
-pause button is for market-facing states, not for someone's home. When a lease **COMPLETES**
-the property passes to **DISABLED** — deliberately dark, because a vacated
-place needs cleaning, repairs, an owner's eyes — and returns to
-**ACTIVE** only when its owner clicks the explicit "make it available"
-gesture. A **CANCELLED** lease hands the property back to whatever it was
-before it at once — its whole matrix returned, nothing half-held. An
-**EXPIRED** one does not: the lease whose validity ran out still has a
-settlement to walk (6.7), and until that settlement resolves the property
-stays dark — no new tenant races in underneath a holdover occupant and
-unresolved custody. Two tenants, one property, zero races, including the
-expiry-shaped one. And CANCELLED itself is scoped by the same logic: it
+pause button is for market-facing states, not for someone's home. **The
+handover back to the world happens at settlement birth, per the operator's
+ruling — never at settlement resolution.** The moment a lease ends and
+its settlement is auto-generated — completed or expired, the settlement
+being generated either way (6.7) — the property passes to **DISABLED**
+in that same instant: deliberately dark, because a vacated place needs
+cleaning, repairs, an owner's eyes — and *freed*, no longer the ending
+lease's subject. It returns to **ACTIVE** only when its owner clicks the
+explicit "make it available" gesture, and **nothing inside the
+settlement gates that click**: settlement must not waste time for new
+tenants — the money walk of 6.7 (move-out, repairs, escrow refunds,
+debts) and the property's availability run in parallel, the settlement
+resolving in the background while the property is already free to be
+re-activated, re-listed and re-leased. The old expiry reading this
+paragraph once carried — "until that settlement resolves the property
+stays dark; no new tenant races in underneath unresolved custody; two
+tenants, one property, zero races, including the expiry-shaped one" — is
+struck: the settlement is a money walk, not occupancy. What survives of
+the race-law is the invariant that actually matters: **one live lease per
+property** — a new lease can only be born from ACTIVE, and ACTIVE
+requires the old lease terminal first, so two *live* tenancies never
+share one property even while an old settlement still resolves behind
+them; a holdover occupant is a physical fact for the ticket and the
+admin, never a reason to hold the listing hostage. A **CANCELLED** lease
+hands the property back to whatever it was before it at once — its whole
+matrix returned, nothing half-held (it is the pre-commitment word, so no
+settlement exists to wait for). And CANCELLED itself is scoped by the same logic: it
 is the pre-commitment word — PENDING exits and the import's refusal —
 never a mid-life exit; a lease that has been confirmed or has lived has
 no whole matrix left to return, and it ends through the settlement's
@@ -1645,22 +2157,28 @@ for the property — are **seeder concerns** (the operator's ruling): the
 schema stays as `DATABASE.txt` declares it, and the words land with the
 rest of the status vocabularies when the modules are built.
 
-One guard declaration the lease makes for itself, the visits module's twin:
-**non-subscription**. No plan feature is ever bound to the lease activity
-family, so the subscription guard's empty-binding escape keeps leases free
-of plan quotas forever — a tenancy is not a bulk operation, and counting
-them against a plan would tax the act of living somewhere. Rate limits
-remain available as always (a rule row is the admin's ordinary throttle),
-and the permission rows and authority expressions apply unchanged —
-non-subscription means the *quota* dimension is deliberately empty, never
-that the module is unguarded.
+The lease's guard posture is the visits module's twin, stated the
+operator's way: **all guards are implemented on all methods, and row
+existence decides what applies.** Every lease method runs the full guard
+stack; for the *subscription* dimension **no plan-feature row is ever
+bound to the lease activity family**, so the guard finds nothing to count
+and leases stay free of plan quotas forever — a tenancy is not a bulk
+operation, and counting them against a plan would tax the act of living
+somewhere. That absence of a row *is* the whole mechanism — not an escape
+hatch, not a declaration the guard special-cases. Rate limits obey the
+same row-existence law: a rule row exists → the admin's ordinary throttle
+bites; no row → open. The permission rows and authority expressions apply
+unchanged on every method — no row means the quota dimension has nothing
+to enforce, never that the module is unguarded.
 
 ## 6.1 Birth: the tenant creates, the policy chain prices the deposits, and the matrix is funded
 
 The tenant — signed in, **KYC-verified through the identity host's own
 truth** (the same door every property creator passed; the registry already
 declares the verification routes), property ACTIVE and published — creates
-a lease by choosing the property and a pricing; the lease row is born
+a lease by choosing the property and a pricing; a pricing whose window
+stands EXPIRED refuses this birth outright (Part 4.2's law: history
+reads, the future does not start), and the lease row is born
 PENDING because *neither party is ready yet*, and the verification is
 re-read at the landlord's confirmation — the moment the commitment becomes
 real, because rent-scale money never moves under an identity that has
@@ -1670,7 +2188,10 @@ tenant. What the specification calls the automatic
 part happens before the first screen finishes loading: the system reads the
 pricing's policy chain — resolved through the property's state, exactly the
 Benin-versus-Nigeria resolution of Part 4.3 — and **derives the entire
-deposit standard**: ADVANCE with its unit (UNITS: value months-of-this-
+deposit standard**: ADVANCE — a policy of type **INSTALLMENT**, nothing
+more special than that: a prepaid advance on installments, read by type
+and unit like every other policy (6.0) — with its unit (UNITS: value
+months-of-this-
 pricing; AMOUNT: a fixed figure), and each other policy (SECURITY,
 ELECTRICITY, and whatever else the admin has declared — the mandatory ones
 enforced at birth exactly as the publishing gate enforces them at
@@ -1682,7 +2203,9 @@ its own kind of quantity, with no bespoke screen.
 Then the matrix is funded in one event: the total — computed as the frozen
 amounts (units × the rent *at this pricing's version*, for UNITS policies;
 the value itself, for AMOUNT ones) — becomes one payment for the lease,
-splits per deposit kind and per advance month as set out in 6.0, escrows
+**splits shaped per policy unit exactly as 6.0 derives them** — one split
+per unit for UNITS policies, one global split for AMOUNT policies, per
+deposit kind — escrows
 all HELD, the money leaves the tenant's wallet exactly once. The **frozen
 amounts are frozen here, in the payment's actual money, and never
 re-derived**: if the pricing is re-versioned mid-life, rent history stays
@@ -1781,7 +2304,7 @@ The owner confirms the lease and thereby *stamps their commitment* — the
 machine's second checkpoint — and the lease enters CONFIRMED. The meaning
 of the word is fixed by the operator's ruling: **CONFIRMED means committed
 and awaiting the move-in conditions** to be created and confirmed. When
-`requires_conditions` on the bound pricing is TRUE, that stage is real:
+the bound pricing's `checkable` column is TRUE, that stage is real:
 the tenant takes the move-in condition reports — the photographs and the
 enumerated state of the premises (the `BEFORE_MOVE_IN` rows of the
 conditions) — attaches them while the lease is not yet ACTIVE, and the
@@ -1879,7 +2402,12 @@ later top-up — so no interpretation can ever float *which* month was
 consumed; the breakdown's stored escrow identity names that exact escrow,
 and any later reading reconstructs the consumption line by line. The
 advance balance **drops by one**, its row updated inside the release's
-transaction, versioned and logged. The tenant then **restores** the
+transaction, versioned and logged — the UNITS shape; an **AMOUNT-typed**
+advance instead drops **to zero** in that same act, its one global split
+releasing whole (6.4's atomicity: no split is ever drawn down a period at
+a time). FIFO is the UNITS shape's tie-breaker — an AMOUNT hull holds
+exactly one advance escrow, so the order names it by default. The tenant
+then **restores** the
 balance deliberately: a top-up payment — their own reference, one split
 per month restored, new escrows HELD — climbs the balance back (one
 payment may restore two months or such, its splits per advance — exactly
@@ -1997,19 +2525,35 @@ the born payment's own money — the escrow sums — never a second price
 column that could drift from custody: the schema's balance column carries
 the counter, and the money lives in exactly one place.
 
-**The AMOUNT-typed advance gets the same honesty in a different hull.**
-Its custody is one gross escrow over its whole frozen figure, not one
-escrow per month, and its balance counter is the number of whole
-month-equivalents that figure covers at birth — the frozen amount divided
-by the frozen month rent, floored, computed once, logged, and never
-re-divided however the rent later re-versions. Consumption walks that
-custody with pay's partial release (pay's plan carries the exact shape):
-each consumed period releases exactly one frozen month's rent from the
-gross escrow, the remainder stays HELD while it is positive, the counter
-drops by one, and the breakdown's stored escrow identity lands exactly as
-in the per-month case. When the remainder can no longer cover a whole
-month, the escrow sits until settlement — the machine never releases a
-month it cannot name exactly. **The other deposits never release
+**The AMOUNT-typed advance gets the same honesty in a different hull — and
+under 6.0's atomicity law its hull is one indivisible split.** Its custody
+is **one global escrow over one split** carrying the whole frozen figure
+(the shape rule: AMOUNT policies get one global split), and its balance
+counter is the number of whole month-equivalents that figure covers at
+birth — the frozen amount divided by the frozen month rent, floored,
+computed once, logged, and never re-divided however the rent later
+re-versions. That counter still governs the notices and the grace
+arithmetic (6.5); what it can no longer do is slice the money, because
+**no partial release exists anywhere in this plan** — a split is fully
+released or fully refunded, never drawn down a month at a time (the old
+"consumption walks pay's partial release" story is struck by the
+operator's ruling). So consumption of the AMOUNT hull is whole too: when
+a period is consumed from custody (6.3's overdue law), the global split
+is **released in full** to the property owner and its counter drops **to
+zero** in the same transaction — one split consumed as one unit of the
+policy's thing, the miss settled from custody exactly as the per-month
+case settles it — and from that instant the cushion is gone, so the
+DEPOSIT notice (6.5) hands itself out against the zero counter and
+demands reconstitution, whose top-up funds a fresh global split (one per
+amount-policy value), ready for the next consumption. If the lease ends
+with the split never consumed, it stands HELD and the settlement refunds
+it whole to the tenant — a split's only two fates. Flagged for the
+operator, one sentence to settle: the atomic law makes every AMOUNT-advance
+consumption release the *entire* figure, so a first miss on a figure
+covering three months credits the owner all three at once — the direct
+consequence of "one split, one unit, whole or not at all"; the
+alternative reading (release only when the counter reaches zero, earlier
+misses standing OVERDUE until then) is one flag away if he prefers it. **The other deposits never release
 along the way**: SECURITY and ELECTRICITY escrows stay HELD for the
 lease's whole life, whatever else happens — their money's only exits are
 the settlement (return to tenant, 100%) or the disputes' adjudication.
@@ -2023,23 +2567,31 @@ born with, whatever the deed says today, and the transfer's economics are
 the parties' private affair. The owner field governs *new* money only —
 fresh payments, the settlement's created debts — never the custody
 already standing. The visits module rides the same discipline, not the
-exception to it: a visit's *destination* is announced at settle time
-(the legacy lane's settle-announces-destinations), while a lease
-releases custody *born months or years earlier* with its beneficiaries
-frozen at birth — two lanes of pay, one discipline each.
+exception to it: a visit's destination is *also* frozen at birth — the
+split names the property owner in the same act that creates it (5.1's
+ruling; the old "announced at settle time" story is gone) — so a lease's
+custody *born months or years earlier* and a visit's custody born minutes
+earlier both release to the beneficiaries their own births named: one
+discipline, no special lane.
 
 ## 6.5 The notice engine: DEPOSIT, VACATION, RECONVERSION, and the vigile
 
 The notices are the lease's immune system — each one a small state
 machine living inside the lease's machine, driven by the cron the
-specification calls the vigil (hourly, reading `expires_at`, forcing the
-transitions silence cannot argue with). The schema correction this plan
+specification calls the vigil (hourly, reading each notice's validity end,
+forcing the transitions silence cannot argue with). The schema correction this plan
 makes them legible: an own primary key (not the lease id — a lease
 spawns a parade of notices across its life, so **many-to-one** per the
 ruling), the lease foreign key, the type, the reason, the issued instant,
 the response field (so 72-hour *silence* is distinguishable from an
 explicit refusal — the cron acts on silence, the humans audit the
-refusals), and `expires_at` as the clock the vigil reads.
+refusals), and the validity id the notice already holds. And per the
+operator's ruling the notice carries **no `expires_at` column and no
+status id**: it holds a validity row, and that row is its clock — the
+vigil reads the validity's end instant, and the notice's state is read
+from its response and that window (issued, answered, expired-by-silence),
+never from a status column that would only duplicate what the validity
+already says.
 
 **The DEPOSIT notice.** Triggered the moment the ADVANCE balance
 *reaches* one period — by descent or by birth: a lease born with a
@@ -2074,8 +2626,10 @@ second invitation.
 
 **The VACATION notice.** Three months to vacate — and the ruling is
 mechanical: **issuing the notice sets the lease's validity to a datetime,
-the notice's own expiry — taken as the earlier-of against the prior end
-(below), so the stamp itself never lengthens a tenancy**. The retime is a stamp on the validity row,
+the notice's own expiry — which is the validity row's end instant, the
+notice holding a validity rather than a clock of its own — taken as the
+earlier-of against the prior end (below), so the stamp itself never
+lengthens a tenancy**. The retime is a stamp on the validity row,
 versioned and logged like every lease edit: the prior validity — a fixed
 end on a fixed-term lease, **null on the open-ended one, the lease whose
 validity never named an end** — is preserved on the notice's own record,
@@ -2301,8 +2855,10 @@ the notice's cancellation only for the periods the restored validity
 again covers, never for rent prepaid beyond even the restored end). And here the
 specification's golden rule, which this plan endorses as the finest
 sentence in the whole document: **first cancel the escrows, then pay
-the debts** — every remaining HELD escrow (SECURITY, ELECTRICITY, the
-unconsumed remainder of ADVANCE) is refunded to the tenant at a
+the debts** — every remaining HELD escrow (SECURITY, ELECTRICITY, an
+advance's still-held month-splits — or, for an AMOUNT hull, its one
+global split, which by 6.0's atomic law stands either already fully
+released or still fully HELD) is refunded to the tenant at a
 hundred percent, in one *logical* refund act — composed of pay's per-split
 refunds, a sequence that converges because refundable value is exactly the
 still-HELD value, so a failure mid-sequence re-runs and completes rather
@@ -2331,16 +2887,21 @@ failed to finish.
 
 **When the settlement is confirmed** — and under this plan everything a
 settlement has moved stays moved, because money history is append-only —
-the lease passes to **COMPLETED**, and the property passes to
-**DISABLED**, waiting for its owner to click "make it available" and
-let the machine show it to the world again. **When the boolean
+the lease passes to **COMPLETED**. The property's half of the handover
+happened earlier, at the settlement's birth: the instant the settlement
+was auto-generated the property passed to **DISABLED** (6.0's ruling —
+settlement entry frees it, settlement work never holds it), so
+confirmation touches only the lease's word; the property still waits for
+its owner's "make it available" click, and no part of the settlement walk
+ever gated that. **When the boolean
 is FALSE** (the bypassed-conditions lease), the end-of-life is a
 **degenerate settlement**: no move-out stage, no repair negotiation, no
 photographs — the settlement machinery itself runs (Part 6.2's law:
 bypass removes bureaucracy, never money truth), and its automatic
 calculation resolves every held escrow: over a hotel stay the deposits
-go 100% back to the tenant, debts usually nil, one confirm, property
-DISABLED, worth the ten minutes the tenancy lasted.
+go 100% back to the tenant, debts usually nil, one confirm, the property
+already DISABLED since the settlement's birth (6.0), worth the ten
+minutes the tenancy lasted.
 
 **DISPUTED** (the lease's own status, not the tickets') is the freeze:
 any ticket opened on the lease — the condition disagreement, the repair
@@ -2457,12 +3018,18 @@ decides planning responsibility and nothing about money; the visitor id
 decides who pays and who is refunded. Three ids, three meanings, never
 substituted for one another.
 
-**Guards are not re-implemented.** Authority comes from the permission rows
+**Guards are not re-implemented.** All guards are implemented on all
+methods — the operator's law — and **row existence decides** whether each
+dimension applies. Authority comes from the permission rows
 and the endpoint's five-layer expression; delegation from consents and seats;
-quotas from the deliberately-empty visit binding; throttling from rate-rule
-rows; record access from OwnershipGuard subclasses; money doors from the
+quotas from the plan-feature rows (a bound row with a limit makes them real
+— the visits and lease families bind none, so there is nothing to count,
+which is what "non-subscription" always meant); throttling from rate-rule
+rows (a row turns it on, no row leaves it open); record access from
+OwnershipGuard subclasses; money doors from the
 platform stamp. Each module above adds business behaviour on top of those and
-assumes none of them away.
+assumes none of them away — the stack runs on every method, and what it
+finds in the rows is what decides.
 
 **Fail closed, decide loudly.** Every ambiguous gate in this plan resolves to
 a refusal with a stated reason, never to a silent allow — the estate's
@@ -2477,7 +3044,8 @@ settled — the legacy lane's law, with the matrix lane's refunds reading the
 still-HELD escrows instead of the funding word (pay's plan, Part 4); every
 movement preceded by the state change that authorized it in
 the same breath. The visit module's four money outcomes — full refund
-(pre-commitment or owner fault), 80/20 split (confirmed cancellation), full
+(pre-commitment or owner fault), full refund plus the direct 20% penalty
+payment (confirmed cancellation), full
 owner payout (completed visit), admin-directed payout (dispute) — are the
 only ones that exist, and each names its trigger explicitly. The lease
 module's outcomes hang off the same law with the split as their unit:
@@ -2499,11 +3067,23 @@ rewrite*.
 
 **Ambiguities flagged for the operator, defaults chosen and visible.**
 (1) The 24-hour cancellation window's direction — default: cancellable while
-at least 24 hours remain. (2) Symmetry of cancellation — default: either
-party may cancel pre-24h with the same 80/20 split; the alternative (owner
-cancel refunds visitor in full) is one sentence away. (3) Assessment deadlock
-— default: no auto-force, disputes are admin decisions. (4) Owner at
-settlement — default: the property's current owner at settle time. (5) The
+at least 24 hours remain. (2) Symmetry of cancellation — **closed by the
+operator**: the door is the visitor's alone, already-CONFIRMED, priced by
+the full refund plus the direct 20% penalty payment (5.4); the owner's
+side exits only through the owner-fault, staff, clock and ticket paths.
+The flag survives only as an invitation: one sentence from the operator
+reopens a paid owner-side cancel door if he ever wants one. (3) Assessment deadlock
+— **settled by the operator's STARTED ruling**: the assessment window
+(60 minutes past the visit's planned end, env-bound) closes into a
+silently COMPLETED visit with the escrow released (5.3); what the flag
+still covers is *after* an auto-complete when a party claims injustice —
+default: the support ticket, admin adjudication, filed judgments stay
+filed. (4) Owner at
+settlement — **settled by the visit-money ruling**: the split is defined
+at payment creation with the property owner as its destination, and the
+born destination governs (5.1, 5.3, 6.4) — money's destination is born,
+not announced; the flag exists only to let the operator overturn that if
+he wants the settle-moment owner instead. (5) The
 amenity cascade's literal reading — default: holdings go down with the
 global amenity (and come back on re-enable unless the owner had disabled
 them personally); the property's own status is untouched by the cascade
@@ -2526,14 +3106,30 @@ a fresh lease is the comeback path (Part 6.7's strange cases), and (8) the
 EXTERNAL-cash threshold — default: no amount gate for cash confirmations,
 the ticket path carrying every contest (Part 6.8). A ninth flag the two
 lease sources force: (9) **the property's availability after a lease
-completes** — the informal note says the property "becomes available
-again" the moment the settlement is marked as confirmed, while the formal
-specification's Step 4 and the interlock of Part 6.0 keep it DISABLED
-until the owner's explicit "make it available"; the plan's default is the
-formal rule — deliberate darkness between tenancies — and the flag stands
-so the operator settles which one the platform obeys. And the scrutiny
+ends** — the operator's settlement ruling has settled the *timing and
+state*: the property passes to DISABLED the moment the settlement is
+auto-generated, never held until confirmation or resolution (6.0); what
+the flag still covers is only the last step — whether that DISABLED
+property returns to ACTIVE on the owner's explicit "make it available"
+click (the plan's default: yes, deliberate darkness between tenancies,
+the owner chooses when to re-list) or flips to available automatically
+(the informal note's "becomes available again at confirmation" reading);
+one sentence settles it. A tenth flag the
+no-show ruling forces: (10) **the visitor's no-show penalty figure** —
+the operator's sentence says both "pays the property owner 20% of the
+fees" and "the amount is 40%"; the plan's default is **40%** of the
+visit's fees, credited whole to the property owner through the new
+penalty payment with its customized reason (5.3), and the flag stands so
+the operator switches the figure — or splits it — in one sentence. An
+eleventh flag the atomic-split ruling forces: (11) **AMOUNT-advance
+consumption** — one global split means every consumption releases the
+*whole* figure (a first miss on a three-month figure credits all three
+months at once; 6.4), the direct consequence of "one split, one unit,
+whole or not at all"; the alternative — release only when the counter
+reaches zero, earlier misses standing OVERDUE until then — is one
+sentence away if the operator prefers it. And the scrutiny
 rounds added their own defaults, stated where they bite: the lease's
-non-subscription declaration (6.0), the tenant's KYC gate re-read at the
+non-subscription's absent plan-binding rows (6.0), the tenant's KYC gate re-read at the
 landlord's confirmation (6.1), the birth saga's compensation and
 orphan-adoption law (6.1), the top-up overshoot legality (6.3), the
 grace-failure escalation and the earlier-of horizon with its unearned-rent
@@ -2548,13 +3144,14 @@ every axis, one per installment, filed with the resolution act (6.3,
 judgments stay filed; the ticket weighs; whether the reputation host
 should ever honor an admin's voiding of a wrongfully auto-filed one is
 the one open point) — and the stress round's own defaults: the expired
-lease keeps its property dark until the settlement resolves (6.0, the
-zero-race law carried through the expiry shape), a cleared reconversion
+lease hands its property to DISABLED at the settlement's birth, never
+holding it until resolution (6.0, the operator's settlement-timing
+ruling replacing the old zero-race hold), a cleared reconversion
 backlog dissolves the borrowed clock into an open-ended tenancy (6.6),
 and the vigil's consumption versus the tenant's own payment serializes on
 the breakdown's status, the loser's money returning whole (6.3) — each
 overturnable by one
-operator sentence. Each of these isI made a huge mistake . An agent made an git reset an evry uncommited work were lost 
+operator sentence. Each of these is
 written where
 it bites, restated here so review can find them in one place.
 
