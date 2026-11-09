@@ -17,6 +17,7 @@ import java.sql.Savepoint;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -119,6 +120,167 @@ public class LogsRepository {
         Long count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM " + logsTable + " WHERE entity_id = ?",
                 Long.class, entityId);
+        return count != null ? count : 0L;
+    }
+
+    /**
+     * One revision of one record, reconstructed from the audit chain.
+     * <p>
+     * <b>Why the chain and not the row.</b> PLAN.md Part 1's versioning law
+     * gives a record ONE row that always holds its newest truth and a
+     * {@code version} that states which truth that is. The row therefore cannot
+     * answer "what did this look like at version 2" — the chain can, because
+     * every write stores the full old and new snapshot in the same transaction
+     * as the version bump. A revision is whichever side of an entry states the
+     * version asked for: an entry's {@code new_data} (the write that created it)
+     * or a later entry's {@code old_data} (the write that replaced it). Both
+     * sides are asked, so a revision whose creating entry is missing — the one
+     * gap a pruned chain can leave — is still answered by the entry that
+     * replaced it.
+     * <p>
+     * <b>Why the predicate is a column and not JSON.</b> V41 materialises the
+     * version each side states ({@code new_version}, {@code old_version}) as
+     * generated columns with partial indexes, so both branches of the union are
+     * an index seek on {@code (entity_id, reference_id, <version>)} instead of a
+     * walk over the record's whole history evaluating a CASE per entry. The
+     * guards that made the JSON cast safe live in V41's generated expression now;
+     * a malformed payload is NULL there rather than a SQL error here.
+     * <p>
+     * {@code ORDER BY created_at DESC, id DESC} inside each branch, and again over
+     * the union, makes the answer the <i>newest</i> truth recorded for that
+     * revision and makes two entries in the same millisecond deterministic (the
+     * same tie-break the turn referee uses).
+     * <p>
+     * A missing snapshot is a real answer, not an error to paper over: the four
+     * history-bearing writes fail closed ({@code LogsService.createOrFail}), but
+     * the rest of the module stays fail-soft by design, and a pruned or
+     * pre-versioning row can still leave a hole. The caller must refuse rather
+     * than serve today's truth under yesterday's version number.
+     */
+    public Optional<String> findRevisionSnapshot(UUID entityId, UUID referenceId, int version) {
+        String sql = "SELECT snapshot::text FROM ("
+                + "SELECT created_at, id, new_data AS snapshot FROM " + logsTable
+                + " WHERE entity_id = ? AND reference_id = ? AND new_version = ?"
+                + " UNION ALL "
+                + "SELECT created_at, id, old_data FROM " + logsTable
+                + " WHERE entity_id = ? AND reference_id = ? AND old_version = ?"
+                + ") rev WHERE snapshot IS NOT NULL"
+                + " ORDER BY created_at DESC, id DESC LIMIT 1";
+        List<String> rows = jdbc.query(sql, (rs, rowNum) -> rs.getString(1),
+                entityId, referenceId, version, entityId, referenceId, version);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
+    }
+
+    /**
+     * Which revisions of one record the chain holds, newest first — the answer
+     * {@code /revisions} gives, so a client never has to discover a version by
+     * asking for it and reading a refusal.
+     * <p>
+     * One row per revision, stamped with the instant the <i>newest</i> entry
+     * stating it was written — the same entry {@link #findRevisionSnapshot} would
+     * serve — because a revision can be restated by a later entry (a pause, a
+     * backlog sweep) and this listing must agree with the read it indexes.
+     * {@code GROUP BY} on the generated column is the whole query: the partial
+     * index on {@code (entity_id, reference_id, new_version)} bounds it to one
+     * record's versioned entries.
+     */
+    public List<RevisionRow> findRevisions(UUID entityId, UUID referenceId) {
+        String sql = "SELECT new_version AS version, MAX(created_at) AS recorded_at FROM "
+                + logsTable
+                + " WHERE entity_id = ? AND reference_id = ? AND new_version IS NOT NULL"
+                + " GROUP BY new_version ORDER BY new_version DESC";
+        return jdbc.query(sql,
+                (rs, rowNum) -> new RevisionRow(
+                        rs.getInt("version"),
+                        rs.getTimestamp("recorded_at").toInstant()),
+                entityId, referenceId);
+    }
+
+    /** One revision of one record: the number, and when it became the newest truth. */
+    public record RevisionRow(int version, Instant recordedAt) {
+    }
+
+    /**
+     * The state each of these records stated at an instant — "what did this page
+     * of prices say on the third of March".
+     * <p>
+     * <b>Why the chain again.</b> A row's window is rewritten in place when the
+     * owner issues a new validity, so the table cannot answer what an <i>expired</i>
+     * window said before it was replaced. The chain can: every write stored the
+     * full snapshot, so the state at an instant is the {@code new_data} of the
+     * newest entry written at or before it. One query for a whole page
+     * ({@code DISTINCT ON reference_id}) instead of one per row.
+     * <p>
+     * <b>A null snapshot is a real answer.</b> The newest entry at that instant
+     * can be a removal ({@code FORGET}, {@code DELETE}) whose {@code new_data} is
+     * null — the record did not exist then, and the caller must omit it rather
+     * than fall back to an earlier truth.
+     * <p>
+     * <b>The index it needs.</b> {@code (entity_id, reference_id, created_at DESC,
+     * id DESC)} — the ordering is exactly {@code DISTINCT ON}'s, so each record's
+     * seek stops at its first row. V42 reinstates that index for this reader;
+     * V40's copy was dropped when its only reader was replaced, and a third btree
+     * on every audit insert is a cost that has to be earned.
+     */
+    public List<StateRow> findStatesAt(UUID entityId, Collection<UUID> referenceIds, Instant at) {
+        if (referenceIds == null || referenceIds.isEmpty()) {
+            return List.of();
+        }
+        StringBuilder sql = new StringBuilder("SELECT DISTINCT ON (reference_id) reference_id, new_data::text")
+                .append(" FROM ").append(logsTable)
+                .append(" WHERE entity_id = ? AND created_at <= ? AND reference_id IN (");
+        List<Object> params = new ArrayList<>();
+        params.add(entityId);
+        params.add(ts(at));
+        int i = 0;
+        for (UUID referenceId : referenceIds) {
+            sql.append(i++ == 0 ? "?" : ", ?");
+            params.add(referenceId);
+        }
+        sql.append(") ORDER BY reference_id, created_at DESC, id DESC");
+        return jdbc.query(sql.toString(),
+                (rs, rowNum) -> new StateRow(
+                        rs.getObject("reference_id", UUID.class),
+                        rs.getString(2)),
+                params.toArray());
+    }
+
+    /** One record's state at an instant: its id and the snapshot, possibly null (gone). */
+    public record StateRow(UUID referenceId, String snapshot) {
+    }
+
+    /**
+     * The latest entry of one reference among a set of activities — the turn
+     * referee. Ordered by the log's own clock, so the transaction that committed
+     * last owns the move and no edit is lost to a race.
+     */
+    public Optional<Log> findLatestByReferenceAndActivities(UUID referenceId, List<UUID> activityIds) {
+        if (activityIds == null || activityIds.isEmpty()) {
+            return Optional.empty();
+        }
+        StringBuilder sql = new StringBuilder("SELECT * FROM ").append(logsTable)
+                .append(" WHERE reference_id = ? AND activity_id IN (");
+        List<Object> params = new ArrayList<>();
+        params.add(referenceId);
+        for (int i = 0; i < activityIds.size(); i++) {
+            sql.append(i == 0 ? "?" : ", ?");
+            params.add(activityIds.get(i));
+        }
+        sql.append(") ORDER BY created_at DESC, id DESC LIMIT 1");
+        List<Log> results = jdbc.query(sql.toString(), this::mapRow, params.toArray());
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
+    /**
+     * How many times one person performed one act on one reference — the
+     * "once per person per visit" gates (5.4's reschedule) are read from the
+     * same history that records them, never from a flag.
+     */
+    public long countByReferenceActivityAndCreator(UUID referenceId, UUID activityId, UUID createdBy) {
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM " + logsTable
+                        + " WHERE reference_id = ? AND activity_id = ? AND created_by = ?",
+                Long.class, referenceId, activityId, createdBy);
         return count != null ? count : 0L;
     }
 
