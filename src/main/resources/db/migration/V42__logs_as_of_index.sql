@@ -1,0 +1,24 @@
+-- V42 — the as-of read's index, back because it now has a reader.
+--
+-- GET /asset/pricings/answering?at= answers "which prices answered on 3 March"
+-- from the chain: for each of the page's records, the new_data of the newest
+-- entry written at or before the instant. In SQL that is
+--
+--   SELECT DISTINCT ON (reference_id) reference_id, new_data::text
+--   FROM notraius.logs
+--   WHERE entity_id = ? AND created_at <= ? AND reference_id IN (…)
+--   ORDER BY reference_id, created_at DESC, id DESC
+--
+-- which is one ordered walk per record, stopping at its first row. The index
+-- below is that walk: the equality on entity_id, the equality on reference_id,
+-- and the ordering the DISTINCT ON needs. Without it the planner filters
+-- entity_id and sorts every entry of every partition the clock can reach.
+--
+-- V40 created this index for the version-filtered read; V41 dropped it when
+-- that read became a seek on the generated version columns, on the principle
+-- that an index with no reader is a cost on every audit insert. This one has a
+-- reader again, so it is restored rather than invented — same columns, same
+-- order, and the same reasoning about the partitioned parent: PostgreSQL
+-- propagates it to every existing partition and attaches future ones with it.
+CREATE INDEX IF NOT EXISTS idx_logs_entity_reference_created
+    ON notraius.logs (entity_id, reference_id, created_at DESC, id DESC);
