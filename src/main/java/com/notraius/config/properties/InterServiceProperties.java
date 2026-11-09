@@ -11,6 +11,7 @@ public class InterServiceProperties {
 
     private Timeout pay = new Timeout();
     private Timeout logistic = new Timeout();
+    private Timeout assessment = new Timeout();
 
 
     @Getter
