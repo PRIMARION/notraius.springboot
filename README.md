@@ -43,10 +43,10 @@ activity/operation pairs the permission layer reconciles in
 
 ## API surface
 
-**206 HTTP endpoints across 11 controllers**: 188 carry an explicit
-`@PreAuthorize` guard, and the other 18 are the anonymous read doors described
-in *Access model* (a logged-out visitor has no principal for an authority gate
-to resolve, so the servlet chain's `PUBLIC_GET_ENDPOINTS` entry is their gate).
+**206 HTTP endpoints across 11 controllers**: every handler declares exactly
+one rung — an `@authz.authority(...)` gate or the `UNAUTHENTICATED` door — and
+`DoorRegistry` derives the servlet chain, the key floor and the Swagger lock
+from that single declaration. An undeclared handler fails the boot.
 
 | Controller | Base path | Endpoints |
 |---|---|---:|
@@ -158,7 +158,7 @@ only what the library leaves to the host:
 | `ValidityPort` over `notraius.validity` | `NotraiusValidityAdapter` — `findMany` is **one** `IN` query, not the port's default per-row loop the event scan would pay 100×/tick |
 | `StatusPort`, `AppStatusResolver`, `AttachmentStatusResolver`, `WebhookStatusResolver`, `RoleLookupService`, `UsageCounter`, `EntityByIdResolver` | `modules/core`, `config/communication` |
 | `endpoints.yaml` (`EndpointRegistry`) | every inter-service call resolves through it — no endpoint string in Java |
-| The public-door list (`PUBLIC_GET_ENDPOINTS`) | `.env.example`; `PublicSurfaceTest` proves it matches the controllers |
+| Public doors (`UNAUTHENTICATED` / `ANONYMOUS`) | declared on the handler; `DoorRegistry` (shared) derives the chain + Swagger, `PublicSurfaceTest` proves the declarations |
 
 What the host takes as-is: the audit sink (`AuditLogWriter` + `JdbcSavepoint`,
 so an audit failure never rolls back the row it observes), partition management
