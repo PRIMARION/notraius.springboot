@@ -41,7 +41,7 @@ import java.util.UUID;
  * are public doors</b> and carry no {@code @PreAuthorize} at all — a logged-out
  * visitor viewing a published property must see the rules it commits to, and a
  * public rule is readable by anyone; the servlet chain's
- * {@code PUBLIC_GET_ENDPOINTS} entry is the gate, and each call pays an
+ * handler's {@code UNAUTHENTICATED} declaration is the gate, and each call pays an
  * IP-scoped {@link PublicReadThrottle} hit. Visibility is still scoped inside
  * the service, not by the endpoint's tier.
  * Write authority is the creator's alone — staff moderation is read authority,
@@ -97,6 +97,7 @@ public class RuleController {
      * the past, anyone else gets the same 404 a PRIVATE rule gets.
      */
     @GetMapping("/{ruleId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'RULE_GET')")
     public ResponseEntity<RuleResponse> getRule(
             @PathVariable UUID ruleId,
             @RequestParam(required = false) Integer version) {
@@ -111,6 +112,7 @@ public class RuleController {
      * read does: a version list would otherwise confirm the row exists.
      */
     @GetMapping("/{ruleId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'RULE_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listRevisions(@PathVariable UUID ruleId) {
         publicReadThrottle.charge(NotraiusActivities.Rules.GET);
         return ResponseEntity.ok(ruleService.listRevisions(ruleId,
@@ -175,6 +177,7 @@ public class RuleController {
     // never rolls back the nine that were payable.
 
     @GetMapping("/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'RULE_BATCH')")
     public ResponseEntity<BulkResponse<RuleResponse>> batchGet(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Rules.GET);
         UUID callerId = SecurityContextUtils.getCurrentUserId();

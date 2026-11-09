@@ -340,4 +340,42 @@ public final class NotraiusActivities {
         public static final String IMPORT_ACCEPT = "LEASES.IMPORT_ACCEPT";
         public static final String IMPORT_REFUSE = "LEASES.IMPORT_REFUSE";
     }
+    // ── Public read tier ─────────────────────────────────────────────
+    // Every anonymous read declares its own pair (UNAUTHENTICATED door):
+    // one operation per surface, never a second policy on the owner ops.
+    public static final class Public {
+        private Public() {}
+        public static final String PROPERTY_LIST            = "PUBLIC.PROPERTY_LIST";
+        public static final String PROPERTY_GET             = "PUBLIC.PROPERTY_GET";
+        public static final String PROPERTY_REVISIONS       = "PUBLIC.PROPERTY_REVISIONS";
+        public static final String PROPERTY_TENANCY         = "PUBLIC.PROPERTY_TENANCY";
+        public static final String PROPERTY_AMENITIES       = "PUBLIC.PROPERTY_AMENITIES";
+        public static final String PROPERTY_BATCH           = "PUBLIC.PROPERTY_BATCH";
+        public static final String PRICING_LIST             = "PUBLIC.PRICING_LIST";
+        public static final String PRICING_GET              = "PUBLIC.PRICING_GET";
+        public static final String PRICING_ANSWERING        = "PUBLIC.PRICING_ANSWERING";
+        public static final String PRICING_REVISIONS        = "PUBLIC.PRICING_REVISIONS";
+        public static final String PRICING_BATCH            = "PUBLIC.PRICING_BATCH";
+        public static final String TERMS_LIST               = "PUBLIC.TERMS_LIST";
+        public static final String TERMS_GET                = "PUBLIC.TERMS_GET";
+        public static final String TERMS_REVISIONS          = "PUBLIC.TERMS_REVISIONS";
+        public static final String TERMS_RULES              = "PUBLIC.TERMS_RULES";
+        public static final String TERMS_RULE_GET           = "PUBLIC.TERMS_RULE_GET";
+        public static final String TERMS_RULE_REVISIONS     = "PUBLIC.TERMS_RULE_REVISIONS";
+        public static final String TERMS_BATCH              = "PUBLIC.TERMS_BATCH";
+        public static final String RULE_GET                 = "PUBLIC.RULE_GET";
+        public static final String RULE_REVISIONS           = "PUBLIC.RULE_REVISIONS";
+        public static final String RULE_BATCH               = "PUBLIC.RULE_BATCH";
+        public static final String REFERENCE_TYPE           = "PUBLIC.REFERENCE_TYPE";
+        public static final String REFERENCE_DURATION       = "PUBLIC.REFERENCE_DURATION";
+        public static final String REFERENCE_AMENITY        = "PUBLIC.REFERENCE_AMENITY";
+        public static final String REFERENCE_TYPE_BATCH     = "PUBLIC.REFERENCE_TYPE_BATCH";
+        public static final String REFERENCE_DURATION_BATCH = "PUBLIC.REFERENCE_DURATION_BATCH";
+        public static final String REFERENCE_AMENITY_BATCH  = "PUBLIC.REFERENCE_AMENITY_BATCH";
+        public static final String POLICY_GET               = "PUBLIC.POLICY_GET";
+        public static final String POLICY_REVISIONS         = "PUBLIC.POLICY_REVISIONS";
+        public static final String POLICY_BATCH             = "PUBLIC.POLICY_BATCH";
+        public static final String VISIT_PRICING_LIST       = "PUBLIC.VISIT_PRICING_LIST";
+        public static final String VISIT_PRICING_BATCH      = "PUBLIC.VISIT_PRICING_BATCH";
+    }
 }

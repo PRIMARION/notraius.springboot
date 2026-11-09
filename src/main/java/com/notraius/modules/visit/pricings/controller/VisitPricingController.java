@@ -33,11 +33,10 @@ import java.util.UUID;
  * offer per property; pause is the reversible switch, deletion the exception for
  * an offer nothing was sold at.
  * <p>
- * <b>Both reads are public doors</b> and carry no {@code @PreAuthorize}: the
- * visit price is part of the listing a logged-out visitor compares, there is no
- * principal to resolve, and the servlet chain's {@code PUBLIC_GET_ENDPOINTS}
- * entry is the gate. Each call pays an IP-scoped {@link PublicReadThrottle}
- * hit.
+ * <b>Both reads are public doors</b> and declare the {@code UNAUTHENTICATED}
+ * rung: the visit price is part of the listing a logged-out visitor compares,
+ * and the declaration — read by {@code DoorRegistry} — is the gate. Each call
+ * pays an IP-scoped {@link PublicReadThrottle} hit.
  */
 @RestController
 @RequestMapping("/api/v1/notraius/visit-pricings")
@@ -55,6 +54,7 @@ public class VisitPricingController {
     }
 
     @GetMapping
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'VISIT_PRICING_LIST')")
     public ResponseEntity<List<VisitPricingResponse>> listPricings(@RequestParam UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Visits.PRICING_LIST);
         return ResponseEntity.ok(visitPricingService.listPricings(propertyId,
@@ -104,6 +104,7 @@ public class VisitPricingController {
     // ═══════════════════════════════════════════════════════════════════════
 
     @GetMapping("/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'VISIT_PRICING_BATCH')")
     public ResponseEntity<BulkResponse<List<VisitPricingResponse>>> batchList(
             @RequestParam List<UUID> propertyIds) {
         publicReadThrottle.charge(NotraiusActivities.Visits.PRICING_LIST);

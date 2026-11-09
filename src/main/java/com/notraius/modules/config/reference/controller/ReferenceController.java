@@ -50,7 +50,7 @@ import java.util.UUID;
  * and batch) are public doors and therefore carry no {@code @PreAuthorize} at
  * all — a logged-out visitor's property page resolves its type, its duration
  * and its amenities by id, and there is no principal for an authority gate to
- * resolve. The servlet chain's {@code PUBLIC_GET_ENDPOINTS} entry is their gate;
+ * resolve. Each handler declares {@code UNAUTHENTICATED} — that is their gate;
  * each call pays an IP-scoped {@link PublicReadThrottle} hit. Catalogue writes
  * are gated to the admin tier.
  * The two user-tier writes are the ones the plan hands to users by ruling:
@@ -110,6 +110,7 @@ public class ReferenceController {
 
     /** Read a type by id — any status, because history must keep resolving. */
     @GetMapping("/types/{typeId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_TYPE')")
     public ResponseEntity<TypeResponse> getType(@PathVariable UUID typeId) {
         publicReadThrottle.charge(NotraiusActivities.Types.GET);
         return ResponseEntity.ok(referenceService.getType(typeId));
@@ -170,6 +171,7 @@ public class ReferenceController {
     }
 
     @GetMapping("/durations/{durationId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_DURATION')")
     public ResponseEntity<DurationResponse> getDuration(@PathVariable UUID durationId) {
         publicReadThrottle.charge(NotraiusActivities.Durations.GET);
         return ResponseEntity.ok(referenceService.getDuration(durationId));
@@ -249,6 +251,7 @@ public class ReferenceController {
     }
 
     @GetMapping("/amenities/{amenityId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_AMENITY')")
     public ResponseEntity<AmenityResponse> getAmenity(@PathVariable UUID amenityId) {
         publicReadThrottle.charge(NotraiusActivities.Amenities.GET);
         return ResponseEntity.ok(referenceService.getAmenity(amenityId, SecurityContextUtils.getCurrentUserId()));
@@ -336,6 +339,7 @@ public class ReferenceController {
     // `TYPE_IN_USE`) and the moderation state machine all still decide per row.
 
     @GetMapping("/types/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_TYPE_BATCH')")
     public ResponseEntity<BulkResponse<TypeResponse>> batchGetTypes(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Types.GET);
         return ResponseEntity.ok(bulkRunner.read(BulkIdsRequest.checked(ids), referenceService::getType));
@@ -368,6 +372,7 @@ public class ReferenceController {
     }
 
     @GetMapping("/durations/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_DURATION_BATCH')")
     public ResponseEntity<BulkResponse<DurationResponse>> batchGetDurations(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Durations.GET);
         return ResponseEntity.ok(bulkRunner.read(BulkIdsRequest.checked(ids), referenceService::getDuration));
@@ -400,6 +405,7 @@ public class ReferenceController {
     }
 
     @GetMapping("/amenities/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'REFERENCE_AMENITY_BATCH')")
     public ResponseEntity<BulkResponse<AmenityResponse>> batchGetAmenities(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Amenities.GET);
         UUID callerId = SecurityContextUtils.getCurrentUserId();

@@ -44,11 +44,11 @@ import java.util.UUID;
  * reopens the market after an expiry, and is the only path back to LIVE from
  * EXPIRED.
  * <p>
- * <b>Both reads are public doors.</b> They carry no {@code @PreAuthorize} — with
- * no session there is no principal for an authority gate to resolve, so the
- * servlet chain's {@code PUBLIC_GET_ENDPOINTS} entry is the gate; each call pays
- * an IP-scoped {@link PublicReadThrottle} hit instead, and the service still
- * hides a price that is not live from a caller who may not see it.
+ * <b>Both reads are public doors.</b> They declare the {@code UNAUTHENTICATED}
+ * rung; {@code DoorRegistry} turns that one declaration into the skipped key
+ * floor and the chain's {@code permitAll}. Each call pays an IP-scoped
+ * {@link PublicReadThrottle} hit, and the service still hides a price that is
+ * not live from a caller who may not see it.
  */
 @RestController
 @RequestMapping("/api/v1/notraius/asset/pricings")
@@ -65,8 +65,9 @@ public class PricingController {
         this.publicReadThrottle = publicReadThrottle;
     }
 
-    /** Public door — no {@code @PreAuthorize} (see the class note). */
+    /** Public door — the handler declares {@code UNAUTHENTICATED} (see the class note). */
     @GetMapping
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_LIST')")
     public ResponseEntity<List<PricingResponse>> listPricings(@RequestParam UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Pricings.LIST);
         return ResponseEntity.ok(pricingService.listPricings(propertyId,
@@ -74,7 +75,7 @@ public class PricingController {
     }
 
     /**
-     * Public door — no {@code @PreAuthorize}: a non-live price is 404, not 403.
+     * Public door — {@code UNAUTHENTICATED}; a non-live price is 404, not 403.
      * <p>
      * {@code ?version=N} asks what that revision of the price said, reconstructed
      * from the audit chain because the row keeps only its newest truth. History
@@ -82,6 +83,7 @@ public class PricingController {
      * current answer.
      */
     @GetMapping("/{pricingId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_GET')")
     public ResponseEntity<PricingResponse> getPricing(
             @PathVariable UUID pricingId,
             @RequestParam(required = false) Integer version) {
@@ -104,6 +106,7 @@ public class PricingController {
      * required, because an as-of read without an instant is the live list.
      */
     @GetMapping("/answering")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_ANSWERING')")
     public ResponseEntity<List<PricingResponse>> answeringAt(
             @RequestParam UUID propertyId,
             @RequestParam(required = false) UUID typeId,
@@ -119,6 +122,7 @@ public class PricingController {
      * answers everyone else with the 404 an absent price gets.
      */
     @GetMapping("/{pricingId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listRevisions(@PathVariable UUID pricingId) {
         publicReadThrottle.charge(NotraiusActivities.Pricings.GET);
         return ResponseEntity.ok(pricingService.listRevisions(pricingId,
@@ -184,6 +188,7 @@ public class PricingController {
 
     /** The same read for many ids — one round trip, one answer per id. */
     @GetMapping("/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_BATCH')")
     public ResponseEntity<BulkResponse<PricingResponse>> batchGet(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Pricings.GET);
         UUID callerId = SecurityContextUtils.getCurrentUserId();

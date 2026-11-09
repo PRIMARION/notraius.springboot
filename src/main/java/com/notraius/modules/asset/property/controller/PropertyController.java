@@ -47,12 +47,10 @@ import java.util.UUID;
  * which are moderation's — and moderation is never given ownership.
  * <p>
  * <b>Reads are public (UPGRADE.md D1/D2).</b> The market list, the by-id read,
- * the amenity holdings and the tenancy window carry <b>no</b>
- * {@code @PreAuthorize} — that, and only that, is what makes a door anonymous.
- * There is no principal to resolve for a logged-out visitor, so an authority
- * annotation on these handlers could only deny the visitor again; the gate is
- * the {@code PUBLIC_GET_ENDPOINTS} entry in the servlet chain (filter +
- * {@code permitAll}), and each read still pays an IP-scoped
+ * the amenity holdings and the tenancy window declare the
+ * {@code UNAUTHENTICATED} rung — that declaration, read by {@code DoorRegistry},
+ * is what skips the key floor and permits the door in the servlet chain; the
+ * annotation is the gate. Each read still pays an IP-scoped
  * {@link PublicReadThrottle} hit. Drafts, pauses and suspensions stay
  * invisible to everyone but the owner and staff, and every write stays
  * session-bound.
@@ -83,9 +81,10 @@ public class PropertyController {
 
     /**
      * The market page: published properties, filterable by kind, state and text.
-     * Public door — no {@code @PreAuthorize} (see the class note).
+     * Public door — the handler declares {@code UNAUTHENTICATED} (see the class note).
      */
     @GetMapping
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_LIST')")
     public ResponseEntity<Page<PropertyResponse>> listProperties(
             @RequestParam(required = false) UUID typeId,
             @RequestParam(required = false) UUID stateId,
@@ -117,7 +116,7 @@ public class PropertyController {
     }
 
     /**
-     * Public door — no {@code @PreAuthorize}: the row's own visibility decides.
+     * Public door — {@code UNAUTHENTICATED}; the row's own visibility decides.
      * <p>
      * {@code ?version=N} asks for the listing as that revision stated it instead
      * of as it stands now (the row keeps only its newest truth; the answer is
@@ -127,6 +126,7 @@ public class PropertyController {
      * hold what the present row no longer says.
      */
     @GetMapping("/{propertyId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_GET')")
     public ResponseEntity<PropertyResponse> getProperty(
             @PathVariable UUID propertyId,
             @RequestParam(required = false) Integer version) {
@@ -144,6 +144,7 @@ public class PropertyController {
      * this is a read of the same record.
      */
     @GetMapping("/{propertyId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listRevisions(@PathVariable UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Properties.GET);
         return ResponseEntity.ok(propertyService.listRevisions(propertyId,
@@ -157,6 +158,7 @@ public class PropertyController {
      * window, so this door never becomes a second existence oracle.
      */
     @GetMapping("/{propertyId}/tenancy")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_TENANCY')")
     public ResponseEntity<TenancyResponse> getTenancy(@PathVariable UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Properties.GET);
         return ResponseEntity.ok(propertyService.readTenancy(propertyId,
@@ -234,8 +236,9 @@ public class PropertyController {
 
     // ── Amenity holdings ──────────────────────────────────────────────────
 
-    /** Public door — no {@code @PreAuthorize}: unpublished rows still answer 404. */
+    /** Public door — {@code UNAUTHENTICATED}; unpublished rows still answer 404. */
     @GetMapping("/{propertyId}/amenities")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_AMENITIES')")
     public ResponseEntity<List<PropertyAmenityResponse>> listAmenities(@PathVariable UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Properties.GET);
         return ResponseEntity.ok(propertyService.listAmenities(propertyId,
@@ -286,6 +289,7 @@ public class PropertyController {
 
     /** Many properties in one round trip — each answers for its own visibility. */
     @GetMapping("/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_BATCH')")
     public ResponseEntity<BulkResponse<PropertyResponse>> batchGet(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Properties.GET);
         UUID callerId = SecurityContextUtils.getCurrentUserId();

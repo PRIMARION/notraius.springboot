@@ -41,7 +41,7 @@ import java.util.UUID;
  * reads are public doors</b> — a property's page links to the standard behind
  * each of its values, and a logged-out visitor must be able to follow that link,
  * so those handlers carry no {@code @PreAuthorize} at all (the servlet chain's
- * {@code PUBLIC_GET_ENDPOINTS} entry is the gate) and pay an IP-scoped
+ * handler's {@code UNAUTHENTICATED} declaration is the gate) and pay an IP-scoped
  * {@link PublicReadThrottle} hit. Every write is admin-tier, exactly like types
  * and durations.
  * <p>
@@ -88,7 +88,7 @@ public class PolicyController {
     }
 
     /**
-     * Public door — no {@code @PreAuthorize}: a standard is public configuration.
+     * Public door — {@code UNAUTHENTICATED}: a standard is public configuration.
      * <p>
      * {@code ?version=N} answers from the audit chain, because the row keeps only
      * its newest truth. Its history is public for the same reason the row is: a
@@ -96,6 +96,7 @@ public class PolicyController {
      * then" is what that citation invites.
      */
     @GetMapping("/{policyId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'POLICY_GET')")
     public ResponseEntity<PolicyResponse> getPolicy(
             @PathVariable UUID policyId,
             @RequestParam(required = false) Integer version) {
@@ -109,6 +110,7 @@ public class PolicyController {
      * bound behind it. Versions and instants only, never authors.
      */
     @GetMapping("/{policyId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'POLICY_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listRevisions(@PathVariable UUID policyId) {
         publicReadThrottle.charge(NotraiusActivities.Policies.GET);
         return ResponseEntity.ok(policyService.listRevisions(policyId));
@@ -161,6 +163,7 @@ public class PolicyController {
     // time.
 
     @GetMapping("/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'POLICY_BATCH')")
     public ResponseEntity<BulkResponse<PolicyResponse>> batchGet(@RequestParam List<UUID> ids) {
         publicReadThrottle.charge(NotraiusActivities.Policies.GET);
         return ResponseEntity.ok(bulkRunner.read(BulkIdsRequest.checked(ids), policyService::getPolicy));

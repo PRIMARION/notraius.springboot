@@ -44,7 +44,7 @@ import java.util.UUID;
  * <p>
  * <b>The three reads are public doors</b> and therefore carry no
  * {@code @PreAuthorize}: a logged-out visitor has no principal for an authority
- * gate to resolve, so the servlet chain's {@code PUBLIC_GET_ENDPOINTS} entry is
+ * gate to resolve, so the handler's {@code UNAUTHENTICATED} declaration is
  * the gate and the property's own visibility decides the answer. Each call
  * pays an IP-scoped {@link PublicReadThrottle} hit.
  */
@@ -67,6 +67,7 @@ public class TermsController {
 
     /** The values one pricing carries, each with its standard's bounds. */
     @GetMapping("/pricings/{pricingId}/values")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_LIST')")
     public ResponseEntity<List<PolicyValueResponse>> listValues(@PathVariable UUID pricingId) {
         publicReadThrottle.charge(NotraiusActivities.Terms.POLICY_VALUE_LIST);
         return ResponseEntity.ok(termsService.listValues(pricingId,
@@ -77,10 +78,11 @@ public class TermsController {
      * One value, or the value as revision {@code version} stated it.
      * <p>
      * A read travels with the property, so this door has no {@code @PreAuthorize}:
-     * the servlet chain's {@code PUBLIC_GET_ENDPOINTS} entry is the gate and the
+     * the handler's {@code UNAUTHENTICATED} declaration is the gate and the
      * parent property's visibility decides the answer (a draft answers 404).
      */
     @GetMapping("/pricings/{pricingId}/values/{policyId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_GET')")
     public ResponseEntity<PolicyValueResponse> getValue(
             @PathVariable UUID pricingId,
             @PathVariable UUID policyId,
@@ -92,6 +94,7 @@ public class TermsController {
 
     /** Which revisions one value has had — discovery for {@code ?version=}. */
     @GetMapping("/pricings/{pricingId}/values/{policyId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listValueRevisions(
             @PathVariable UUID pricingId, @PathVariable UUID policyId) {
         publicReadThrottle.charge(NotraiusActivities.Terms.POLICY_VALUE_LIST);
@@ -124,6 +127,7 @@ public class TermsController {
     // ── Rule selections ───────────────────────────────────────────────────
 
     @GetMapping("/properties/{propertyId}/rules")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_RULES')")
     public ResponseEntity<List<RuleSelectionResponse>> listRuleSelections(@PathVariable UUID propertyId) {
         publicReadThrottle.charge(NotraiusActivities.Terms.RULE_LIST);
         return ResponseEntity.ok(termsService.listRuleSelections(propertyId,
@@ -137,6 +141,7 @@ public class TermsController {
      * property's visibility and a past one can name a rule since forgotten.
      */
     @GetMapping("/properties/{propertyId}/rules/{selectionId}")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_RULE_GET')")
     public ResponseEntity<RuleSelectionResponse> getRuleSelection(
             @PathVariable UUID propertyId,
             @PathVariable UUID selectionId,
@@ -148,6 +153,7 @@ public class TermsController {
 
     /** Which revisions one selection has had — discovery for {@code ?version=}. */
     @GetMapping("/properties/{propertyId}/rules/{selectionId}/revisions")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_RULE_REVISIONS')")
     public ResponseEntity<List<RevisionSummaryResponse>> listRuleSelectionRevisions(
             @PathVariable UUID propertyId, @PathVariable UUID selectionId) {
         publicReadThrottle.charge(NotraiusActivities.Terms.RULE_LIST);
@@ -184,6 +190,7 @@ public class TermsController {
 
     /** The values many pricings carry — one read per pricing, one answer each. */
     @GetMapping("/pricings/values/batch")
+    @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'TERMS_BATCH')")
     public ResponseEntity<BulkResponse<List<PolicyValueResponse>>> batchListValues(
             @RequestParam List<UUID> pricingIds) {
         publicReadThrottle.charge(NotraiusActivities.Terms.POLICY_VALUE_LIST);

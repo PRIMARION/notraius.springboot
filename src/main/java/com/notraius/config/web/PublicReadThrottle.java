@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * gate, permission rows, plan limits, rate limits — has nothing to resolve
  * and must not run at all (an annotation there either denies the anonymous
  * caller outright or requires an authority that does not exist). The door is
- * therefore the servlet chain's {@code PUBLIC_GET_ENDPOINTS} entry alone.
+ * therefore each handler's declared {@code UNAUTHENTICATED} door alone.
  * <p>
  * What an annotation used to give these reads for free was layer 5, the
  * rate limiter. This bean puts that one layer back, IP-scoped, because the
