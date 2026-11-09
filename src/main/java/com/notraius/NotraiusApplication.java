@@ -37,6 +37,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Notraius microservice bootstrap.
@@ -50,6 +51,8 @@ import org.springframework.context.annotation.ComponentScan;
 @SpringBootApplication(exclude = {FlywayAutoConfiguration.class})
 @EnableConfigurationProperties({NotraiusProperties.class, NotraiusAppProperties.class, InterServiceProperties.class})
 @ComponentScan(basePackages = {"com.notraius"})
+// The visit sweeps (PLAN 5.1's fences) are clock-driven: silence never keeps money.
+@EnableScheduling
 @ImportAutoConfiguration({
     CommonModule.class,
     RedisModule.class,
