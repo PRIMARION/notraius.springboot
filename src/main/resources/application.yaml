@@ -30,6 +30,12 @@ spring:
       pageable:
         default-page-size: ${PAGE_DEFAULT_SIZE:20}
         max-page-size: ${PAGE_MAX_SIZE:100}
+    jpa:
+      repositories:
+        enabled: false
+    redis:
+      repositories:
+        enabled: false
 
   jpa:
     hibernate:
@@ -56,14 +62,6 @@ spring:
     baseline-on-migrate: true
     baseline-version: 0
     validate-on-migrate: false
-
-  data:
-    jpa:
-      repositories:
-        enabled: false
-    redis:
-      repositories:
-        enabled: false
 
   servlet:
     multipart:
@@ -269,44 +267,22 @@ app:
     base-url: ${EMAIL_BASE_URL:https://api.resend.com}
 
   security:
+    # Doors are declared on the handler. With strict-doors on, a handler with
+    # no @PreAuthorize fails the boot instead of silently existing ungated.
+    strictDoors: ${STRICT_DOORS:true}
     # #CTR-18: /error removed — Spring Boot error controller can leak stack traces.
-    # All endpoints require X-Service-Public-Key header. Only /flowmap/**,
-    # /swagger-ui/**, /v3/api-docs/**, and /actuator/** are exempt (handled
-    # by PublicKeyValidationFilter).
-    publicEndpoints: ${PUBLIC_ENDPOINTS:}
-    # Public read tier (UPGRADE.md D1/D2) — the market data a logged-out visitor
+    # Every request needs X-Service-Public-Key unless its handler declares
+    # UNAUTHENTICATED. Actuator and the OpenAPI/Swagger surface are the only
+    # infrastructure allowlist (InfraPublicPaths) — there is no env door list.
     # may browse, plus the targeted config lookups an anonymous renderer follows
     # (asset DTOs carry ids, not config payloads — N1). Empty by default, like
-    # every other public list: forgetting the env leaves surfaces CLOSED rather
     # than accidentally open. The exact endpoint list lives in .env.example —
-    # named one by one, no `**`, the only `*` being the single segment a path
     # variable occupies. Every config LIST, the amenity submission queue and
     # every visit/lease record stay out of it.
-    # These handlers carry NO @PreAuthorize: an anonymous caller has no principal
-    # for an authority gate to resolve, so this list (with the matching
     # permitAll) IS the gate and each handler pays an IP-scoped throttle.
-    # PublicSurfaceTest keeps the list and the annotations in step.
-    publicGetEndpoints: ${PUBLIC_GET_ENDPOINTS:}
-    # GET paths that must answer 401 (credentials required) rather than 403 — the
-    # fixed siblings a public `/*` entry also matches (an owner page beside an
     # id-addressed read, a moderation queue beside a catalogue read). Named in
     # .env.example, never in code; empty by default. The handler's own
     # @PreAuthorize still decides the authority — this only fixes the status a
-    # merely-unauthenticated caller sees.
-    authenticatedGetEndpoints: ${AUTHENTICATED_GET_ENDPOINTS:}
-    publicPostEndpoints: ${PUBLIC_POST_ENDPOINTS:}
-    publicPutEndpoints: ${PUBLIC_PUT_ENDPOINTS:}
-    publicDeleteEndpoints: ${PUBLIC_DELETE_ENDPOINTS:}
-    publicPatchEndpoints: ${PUBLIC_PATCH_ENDPOINTS:}
-    # #PURGE: formerly-hardcoded surfaces are env-driven now.
-    # Actuator surface (exact/**-pattern matched by PublicKeyValidationFilter).
-    actuatorEndpoints: ${PUBLIC_ACTUATOR_ENDPOINTS:}
-    # Public authenticity (QR verify) prefixes — prefix-matched, per-IP
-    # rate-limited inside the controllers. Platform-wide registry: a host
-    # simply ignores prefixes it does not serve.
-    publicAuthenticityEndpoints: ${PUBLIC_AUTHENTICITY_ENDPOINTS:}
-    # Machine-readable OpenAPI doc prefixes (public cache policy).
-    openApiDocPrefixes: ${SECURITY_OPENAPI_DOC_PREFIXES:}
     # Cacheable static/UI asset prefixes (public cache policy).
     cacheableStaticPrefixes: ${SECURITY_CACHEABLE_STATIC_PREFIXES:}
     # Relaxed-CSP path prefixes (dev-only UIs like FlowMap). The relaxed CSP
@@ -314,9 +290,7 @@ app:
     # YAML :empty default would bind an empty string over the code default).
     relaxedCspPrefixes: ${SECURITY_RELAXED_CSP_PREFIXES:}
     cacheMaxAgeSeconds: ${SECURITY_CACHE_MAX_AGE:300}
-    # Validated service public key is enough here — no session. Per-operation
     # rules (lookup YAML tiers) still apply inside the endpoint.
-    keyAuthorizedEndpoints: ${KEY_AUTHORIZED_ENDPOINTS:}
 
     # #AUTH-CENTRAL: keys are PER-SERVICE — this is THIS service's own HMAC
     # key (unique; it must NOT match the other services'). Platform session
