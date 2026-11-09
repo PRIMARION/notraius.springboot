@@ -126,6 +126,15 @@ public class SecurityConfig {
                 .addFilterBefore(signedTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(httpSecurityHeadersFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> {
+                    // A fixed sibling path can sit INSIDE a public wildcard (a `/*`
+                    // entry that reaches id-addressed rows also matches a named
+                    // page beside them). Those paths are named — never hardcoded —
+                    // in AUTHENTICATED_GET_ENDPOINTS so the chain answers 401 to an
+                    // unauthenticated caller instead of permitting the path and
+                    // letting method security answer a misleading 403; the
+                    // handler's own @PreAuthorize still decides the authority.
+                    securityProperties.getAuthenticatedGetEndpoints().stream().filter(e -> !e.isBlank())
+                            .forEach(endpoint -> auth.requestMatchers(HttpMethod.GET, endpoint).authenticated());
                     securityProperties.getPublicEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
                             auth.requestMatchers(endpoint).permitAll());
                     securityProperties.getPublicGetEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
