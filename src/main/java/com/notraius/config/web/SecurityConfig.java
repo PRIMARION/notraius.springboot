@@ -9,6 +9,8 @@ import org.primarion.module.security.auth.filter.SignedTokenAuthenticationFilter
 import org.primarion.module.security.auth.session.SessionContextManager;
 import jakarta.servlet.http.HttpServletResponse;
 import org.primarion.module.security.auth.session.SecurityProperties;
+import org.primarion.module.security.auth.door.DoorRegistry;
+import org.primarion.module.security.auth.door.InfraPublicPaths;
 import org.primarion.module.utils.security.users.SessionIntrospector;
 import org.primarion.module.security.crypto.key.Keyring;
 import org.primarion.module.security.ratelimit.redis.HttpSecurityHeadersFilter;
@@ -91,6 +93,7 @@ public class SecurityConfig {
                                                               AppKeyRepository appKeyRepository,
                                                               AppRepository appRepository,
                                                               SecurityProperties securityProperties,
+                                                              DoorRegistry doorRegistry,
                                                               AppIdentityProperties appIdentityProperties,
                                                               Keyring encryptionKeyring,
                                                               AppStatusResolver appStatusResolver,
@@ -98,7 +101,7 @@ public class SecurityConfig {
                                                               List<Consumer<String>> revokedKeyListeners) {
         PublicKeyValidationFilter filter = new PublicKeyValidationFilter(platformTokenRepository, platformAppKeyRepository, platformAppRepository,
                 tokenRepository, appKeyRepository, appRepository,
-                securityProperties, appIdentityProperties, encryptionKeyring,
+                securityProperties, doorRegistry, appIdentityProperties, encryptionKeyring,
                 appStatusResolver);
         // Immediate cache invalidation when any key service soft-revokes a key
         revokedKeyListeners.add(filter::invalidate);
@@ -108,6 +111,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    SecurityProperties securityProperties,
+                                                   DoorRegistry doorRegistry,
                                                    HttpSecurityHeadersFilter httpSecurityHeadersFilter,
                                                    PublicKeyValidationFilter publicKeyValidationFilter,
                                                    SignedTokenAuthenticationFilter signedTokenAuthenticationFilter,
@@ -126,36 +130,19 @@ public class SecurityConfig {
                 .addFilterBefore(signedTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(httpSecurityHeadersFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> {
-                    // A fixed sibling path can sit INSIDE a public wildcard (a `/*`
-                    // entry that reaches id-addressed rows also matches a named
-                    // page beside them). Those paths are named — never hardcoded —
-                    // in AUTHENTICATED_GET_ENDPOINTS so the chain answers 401 to an
-                    // unauthenticated caller instead of permitting the path and
-                    // letting method security answer a misleading 403; the
-                    // handler's own @PreAuthorize still decides the authority.
-                    securityProperties.getAuthenticatedGetEndpoints().stream().filter(e -> !e.isBlank())
-                            .forEach(endpoint -> auth.requestMatchers(HttpMethod.GET, endpoint).authenticated());
-                    securityProperties.getPublicEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(endpoint).permitAll());
-                    securityProperties.getPublicGetEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(HttpMethod.GET, endpoint).permitAll());
-                    securityProperties.getPublicPostEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(HttpMethod.POST, endpoint).permitAll());
-                    securityProperties.getPublicPutEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(HttpMethod.PUT, endpoint).permitAll());
-                    securityProperties.getPublicDeleteEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(HttpMethod.DELETE, endpoint).permitAll());
-                    securityProperties.getPublicPatchEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(HttpMethod.PATCH, endpoint).permitAll());
-                    // KEY_AUTHORIZED_ENDPOINTS: a validated service public key
-                    // satisfies the chain (PublicKeyValidationFilter already
-                    // rejected missing/unknown keys before this rule runs) — no
-                    // session required. Per-operation authorization belongs to
-                    // the endpoint itself (e.g. lookup YAML tiers, app rules).
-                    securityProperties.getKeyAuthorizedEndpoints().stream().filter(e -> !e.isBlank()).forEach(endpoint ->
-                            auth.requestMatchers(endpoint).access((authentication, object) -> new AuthorizationDecision(
+                    // Infrastructure surface is the only residual allowlist: actuator,
+                    // API docs and Swagger assets have no MVC handler to declare themselves.
+                    auth.requestMatchers(InfraPublicPaths.matcher()).permitAll();
+                    // Doors are declared ON the handler. UNAUTHENTICATED = no credential at
+                    // all; ANONYMOUS = validated public key, no session.
+                    auth.requestMatchers(doorRegistry.unauthenticatedMatcher()).permitAll();
+                    auth.requestMatchers(doorRegistry.anonymousMatcher())
+                            .access((authentication, object) -> new AuthorizationDecision(
                                     object.getRequest().getAttribute(
-                                            PublicKeyValidationFilter.VALIDATED_PUBLIC_KEY_ATTR) != null)));
+                                            PublicKeyValidationFilter.VALIDATED_PUBLIC_KEY_ATTR) != null));
+                    // Everything else needs a session / app / service identity. A named
+                    // handler inside a public wildcard wins on specificity, so it answers
+                    // 401 (not 403) to a caller who is merely unauthenticated.
                     auth.anyRequest().authenticated();
                 })
                 .httpBasic(AbstractHttpConfigurer::disable)
