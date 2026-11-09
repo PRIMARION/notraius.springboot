@@ -18,6 +18,19 @@ spring:
       max-lifetime: ${HIKARI_MAX_LIFETIME}
       validation-timeout: ${HIKARI_VALIDATION_TIMEOUT}
 
+  # Every paged endpoint resolves its Pageable through Spring's resolver, and
+  # that resolver is the only place a ceiling can be enforced once for all of
+  # them. Without one, `?size=1000000` is honoured: a single anonymous GET can
+  # ask the database for a million rows and force them through the mapper. The
+  # public read tier makes that a stranger's decision, so the cap is explicit
+  # and env-tunable rather than left to the framework default (which is
+  # unlimited). Raising max-page-size is a capacity decision, not a client one.
+  data:
+    web:
+      pageable:
+        default-page-size: ${PAGE_DEFAULT_SIZE:20}
+        max-page-size: ${PAGE_MAX_SIZE:100}
+
   jpa:
     hibernate:
       # Flyway owns the schema; Hibernate never generates DDL.
@@ -135,6 +148,35 @@ app:
     notificationsEnabled: ${NOTRAIUS_NOTIFICATIONS_ENABLED}
     payBaseUrl: ${PAY_BASE_URL}
     logisticBaseUrl: ${LOGISTIC_BASE_URL}
+    # PLAN 5.1's fences: silence never keeps money, the numbers ride the env.
+    visitRequestExpiryHours: ${NOTRAIUS_VISIT_REQUEST_EXPIRY_HOURS:24}
+    visitSweepLookbackHours: ${NOTRAIUS_VISIT_SWEEP_LOOKBACK_HOURS:720}
+    visitReeditWindowMinutes: ${NOTRAIUS_VISIT_REEDIT_WINDOW_MINUTES:30}
+    visitConfirmationFenceHours: ${NOTRAIUS_VISIT_CONFIRMATION_FENCE_HOURS:72}
+    # PLAN 5.3's clocks: the counter-signature window, the assessment door, and
+    # 5.4's reschedule/cancel horizon — the operator's numbers, the env's to set.
+    visitStartConfirmWindowMinutes: ${NOTRAIUS_VISIT_START_CONFIRM_WINDOW_MINUTES:10}
+    visitAssessmentWindowMinutes: ${NOTRAIUS_VISIT_ASSESSMENT_WINDOW_MINUTES:60}
+    visitCancelHorizonHours: ${NOTRAIUS_VISIT_CANCEL_HORIZON_HOURS:24}
+    # PLAN 6.1's birth clock: a PENDING lease nobody confirms in 72 hours
+    # expires, its held matrix refunds split by split, the property returns.
+    leaseStalenessWindowHours: ${NOTRAIUS_LEASE_STALENESS_WINDOW_HOURS:72}
+    leaseSweepLookbackHours: ${NOTRAIUS_LEASE_SWEEP_LOOKBACK_HOURS:720}
+    # PLAN 6.2–6.7's clocks: the calendar's horizon, the notice window, the
+    # vacation's months, the move-out week, the settlement fortnight and the
+    # reconversion pace — the operator's numbers, the env's to set.
+    leaseScheduleHorizonPeriods: ${NOTRAIUS_LEASE_SCHEDULE_HORIZON_PERIODS:6}
+    leaseNoticeResponseHours: ${NOTRAIUS_LEASE_NOTICE_RESPONSE_HOURS:72}
+    leaseVacationMonths: ${NOTRAIUS_LEASE_VACATION_MONTHS:3}
+    leaseMoveOutWindowDays: ${NOTRAIUS_LEASE_MOVE_OUT_WINDOW_DAYS:7}
+    leaseSettlementWindowDays: ${NOTRAIUS_LEASE_SETTLEMENT_WINDOW_DAYS:14}
+    leaseReconversionMultiplier: ${NOTRAIUS_LEASE_RECONVERSION_MULTIPLIER:2.5}
+    leaseDepositGraceMultiplier: ${NOTRAIUS_LEASE_DEPOSIT_GRACE_MULTIPLIER:2}
+    # The sweeps' paging: one page of work keys per read, one budget of settled
+    # rows per pass. A worklist larger than the budget resumes from the ledger's
+    # cursor on the next tick instead of being read into memory whole.
+    sweepPageSize: ${NOTRAIUS_SWEEP_PAGE_SIZE:500}
+    sweepRowBudget: ${NOTRAIUS_SWEEP_ROW_BUDGET:5000}
     # roleStandard, roleAdmin → SharedRoles constants; platformTarget* →
     # static constants
     platformCode: ${NOTRAIUS_PLATFORM_CODE:NOTRAIUS}
@@ -149,6 +191,9 @@ app:
     logistic:
       connect-timeout-ms: ${NOTRAIUS_LOGISTIC_CONNECT_TIMEOUT_MS}
       read-timeout-ms: ${NOTRAIUS_LOGISTIC_READ_TIMEOUT_MS}
+    assessment:
+      connect-timeout-ms: ${NOTRAIUS_ASSESSMENT_CONNECT_TIMEOUT_MS}
+      read-timeout-ms: ${NOTRAIUS_ASSESSMENT_READ_TIMEOUT_MS}
 
   web:
     cors:
@@ -229,7 +274,26 @@ app:
     # /swagger-ui/**, /v3/api-docs/**, and /actuator/** are exempt (handled
     # by PublicKeyValidationFilter).
     publicEndpoints: ${PUBLIC_ENDPOINTS:}
+    # Public read tier (UPGRADE.md D1/D2) — the market data a logged-out visitor
+    # may browse, plus the targeted config lookups an anonymous renderer follows
+    # (asset DTOs carry ids, not config payloads — N1). Empty by default, like
+    # every other public list: forgetting the env leaves surfaces CLOSED rather
+    # than accidentally open. The exact endpoint list lives in .env.example —
+    # named one by one, no `**`, the only `*` being the single segment a path
+    # variable occupies. Every config LIST, the amenity submission queue and
+    # every visit/lease record stay out of it.
+    # These handlers carry NO @PreAuthorize: an anonymous caller has no principal
+    # for an authority gate to resolve, so this list (with the matching
+    # permitAll) IS the gate and each handler pays an IP-scoped throttle.
+    # PublicSurfaceTest keeps the list and the annotations in step.
     publicGetEndpoints: ${PUBLIC_GET_ENDPOINTS:}
+    # GET paths that must answer 401 (credentials required) rather than 403 — the
+    # fixed siblings a public `/*` entry also matches (an owner page beside an
+    # id-addressed read, a moderation queue beside a catalogue read). Named in
+    # .env.example, never in code; empty by default. The handler's own
+    # @PreAuthorize still decides the authority — this only fixes the status a
+    # merely-unauthenticated caller sees.
+    authenticatedGetEndpoints: ${AUTHENTICATED_GET_ENDPOINTS:}
     publicPostEndpoints: ${PUBLIC_POST_ENDPOINTS:}
     publicPutEndpoints: ${PUBLIC_PUT_ENDPOINTS:}
     publicDeleteEndpoints: ${PUBLIC_DELETE_ENDPOINTS:}
