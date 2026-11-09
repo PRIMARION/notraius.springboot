@@ -23,6 +23,14 @@ endpoints:
       preferencesUpdate:
         method: PUT
         endpoint: /api/v1/subscriptions/preferences
+  # The property's anchors are resolved through the two hosts that own them:
+  # the location (and thereby the state) by logistics, the currency by pay's
+  # generic lookup surface. notraius mirrors neither table.
+  logistic:
+    location:
+      get:
+        method: GET
+        endpoint: /api/v1/logistic/locations/{locationId}
   pay:
     subscription:
       balance:
@@ -93,6 +101,11 @@ endpoints:
       getSummary:
         method: GET
         endpoint: /api/v1/primarion/reputation/users/{userId}
+      # Every configured axis answers here, scored or not — the only surface
+      # that reveals the axis vocabulary without mirroring primarion's table.
+      axisScores:
+        method: GET
+        endpoint: /api/v1/primarion/reputation/users/{userId}/scores
     assessment:
       createAssessment:
         method: POST
