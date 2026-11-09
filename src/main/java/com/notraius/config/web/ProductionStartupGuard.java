@@ -28,6 +28,11 @@ public class ProductionStartupGuard implements CommandLineRunner {
     // #PROBLEMS-B3 (flowmap): the dev-only source/trace explorer must never
     // boot in production, even if someone ships FLOWMAP_ENABLED=true in .env.
     private final boolean flowmapEnabled;
+    // The shared partition manager can DROP aged audit months. Its cold-tier
+    // export does not exist yet (shared README, decision D1), so retention is
+    // OFF everywhere until it does — and a notarius that turned it on would
+    // destroy the very chain every ?version= door reads.
+    private final int logsRetentionMonths;
 
     public ProductionStartupGuard(
             @Value("${app.profile:dev}") String profile,
@@ -36,7 +41,8 @@ public class ProductionStartupGuard implements CommandLineRunner {
             @Value("${spring.datasource.password:}") String dbPassword,
             @Value("${app.shared.datasource.password:}") String sharedDbPass,
             @Value("${spring.data.redis.password:}") String redisPassword,
-            @Value("${app.flowmap.enabled:false}") boolean flowmapEnabled) {
+            @Value("${app.flowmap.enabled:false}") boolean flowmapEnabled,
+            @Value("${app.logs.retention-months:0}") int logsRetentionMonths) {
         this.prodProfile = isProductionProfile(profile);
         this.hmacKey = hmacKey;
         this.encryptionKey = encryptionKey;
@@ -44,6 +50,7 @@ public class ProductionStartupGuard implements CommandLineRunner {
         this.sharedDbPass = sharedDbPass;
         this.redisPassword = redisPassword;
         this.flowmapEnabled = flowmapEnabled;
+        this.logsRetentionMonths = logsRetentionMonths;
     }
 
     @Override
@@ -63,6 +70,14 @@ public class ProductionStartupGuard implements CommandLineRunner {
         // #PROBLEMS-B3 (flowmap): source snippets + endpoint traces are a
         // dev instrument — hard-fail the boot when enabled in production.
         if (flowmapEnabled) violations.add("FLOWMAP_ENABLED must be false in production (dev-only source explorer)");
+        // The audit chain is not an operational log here: it is the storage the
+        // version doors read (`?version=N`, `/revisions`, `/pricings/answering`).
+        // DROPPING old partitions therefore deletes the past those doors promise,
+        // and shared's retention feature has no cold-tier export yet (D1). It is
+        // refused at the only place that can refuse it before data is lost.
+        if (logsRetentionMonths > 0) violations.add(
+                "APP_LOGS_RETENTION_MONTHS must be 0 in production — no cold-tier audit export exists yet "
+                        + "(shared decision D1), and pruning partitions destroys the version chain");
         if (!violations.isEmpty()) {
             throw new IllegalStateException("Production configuration rejected: "
                     + String.join("; ", violations));
