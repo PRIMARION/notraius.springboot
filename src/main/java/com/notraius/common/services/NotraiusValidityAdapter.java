@@ -9,6 +9,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -51,10 +56,46 @@ public class NotraiusValidityAdapter implements ValidityPort {
     @Override
     @Transactional(readOnly = true)
     public Optional<ValidityView> find(UUID validityId) {
-        return validityRepository.findById(validityId)
-                .map(v -> new ValidityView(v.getId(),
-                        v.getStatus() != null ? v.getStatus().getCode() : null,
-                        v.getFromDate(), v.getToDate()));
+        return validityRepository.findById(validityId).map(NotraiusValidityAdapter::viewOf);
+    }
+
+    /**
+     * The batch read the shared schedulers use — <b>one query, not one per row</b>.
+     * <p>
+     * {@link ValidityPort#findMany} ships a default that loops {@link #find}, and
+     * that default is a trap in a scheduler: the event scan asks once per tick for
+     * the window of every due event (100 by default, every second), so the loop is
+     * up to 100 round trips per second against {@code notraius.validity} for one
+     * page of work. The port's own javadoc invites the host override; this is it —
+     * the ids go to the database as one {@code WHERE id IN (…)} and the map is built
+     * from the rows that come back. Missing ids simply stay absent, which is the
+     * answer the loop gave too (the caller already treats a missing window as
+     * "skip this row").
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Map<UUID, ValidityView> findMany(Collection<UUID> validityIds) {
+        if (validityIds == null || validityIds.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> ids = validityIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, ValidityView> windows = new HashMap<>(ids.size());
+        for (Validity validity : validityRepository.findAllById(ids)) {
+            windows.put(validity.getId(), viewOf(validity));
+        }
+        return windows;
+    }
+
+    private static ValidityView viewOf(Validity validity) {
+        return new ValidityView(validity.getId(),
+                validity.getStatus() != null ? validity.getStatus().getCode() : null,
+                validity.getFromDate(), validity.getToDate());
     }
 
     @Override
