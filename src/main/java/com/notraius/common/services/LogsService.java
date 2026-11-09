@@ -48,26 +48,16 @@ public class LogsService {
 
     // ─── Create ────────────────────────────────────────────────────────────
 
+    /**
+     * The estate's default door: a failed audit row is logged and swallowed, so
+     * the business transaction it observes survives.
+     */
     @Transactional
     public Log create(Entities entity, Activity activity,
                       JsonNode oldData, JsonNode newData, UUID referenceId, String operation) {
-        UUID id = UUID.randomUUID();
-        Instant now = Instant.now();
-        Timestamp nowTs = Timestamp.from(now);
-        JsonNode auditedData = withDelegation(newData);
-
         try {
-            logsRepository.insert(id, nowTs,
-                    entity != null ? entity.getId() : null,
-                    referenceId,
-                    oldData != null ? oldData.toString() : null,
-                    auditedData != null ? auditedData.toString() : null,
-                    resolveActorType(),
-                    resolveActorId(),
-                    activity != null ? activity.getId() : null,
-                    resolveOperation(activity, operation),
-                    sessionContextManager.getCurrentSessionId());
-        } catch (Exception e) {
+            return persist(entity, activity, oldData, newData, referenceId, operation);
+        } catch (RuntimeException e) {
             // Audit logging must never roll back the business transaction it
             // observes (same posture as primarion/pay LogsService). The
             // repository wraps the insert in a server-side SAVEPOINT, so the
@@ -75,6 +65,40 @@ public class LogsService {
             log.error("Failed to insert audit log into {}: {}", tableResolver.resolveParent(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * The demanded door: the same entry, with the failure propagated.
+     * <p>
+     * For the four records whose past is read back by version, the chain is not
+     * a shadow of the row — it is how {@code ?version=N} and {@code /revisions}
+     * answer. A swallowed failure there would leave a version the table states
+     * and the chain cannot reconstruct, so the caller lets this throw and the
+     * whole write (row, version bump, entry) rolls back as one act.
+     */
+    @Transactional
+    public Log createOrFail(Entities entity, Activity activity,
+                            JsonNode oldData, JsonNode newData, UUID referenceId, String operation) {
+        return persist(entity, activity, oldData, newData, referenceId, operation);
+    }
+
+    private Log persist(Entities entity, Activity activity,
+                        JsonNode oldData, JsonNode newData, UUID referenceId, String operation) {
+        UUID id = UUID.randomUUID();
+        Instant now = Instant.now();
+        Timestamp nowTs = Timestamp.from(now);
+        JsonNode auditedData = withDelegation(newData);
+
+        logsRepository.insert(id, nowTs,
+                entity != null ? entity.getId() : null,
+                referenceId,
+                oldData != null ? oldData.toString() : null,
+                auditedData != null ? auditedData.toString() : null,
+                resolveActorType(),
+                resolveActorId(),
+                activity != null ? activity.getId() : null,
+                resolveOperation(activity, operation),
+                sessionContextManager.getCurrentSessionId());
 
         Log logEntry = new Log();
         logEntry.setId(id);
