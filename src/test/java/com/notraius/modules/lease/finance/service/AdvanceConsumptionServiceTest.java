@@ -126,6 +126,28 @@ class AdvanceConsumptionServiceTest {
     }
 
     @Test
+    @DisplayName("a second AMOUNT global split keeps its months when the first is consumed")
+    void amountWithTwoHullsKeepsTheSecond() {
+        LeaseBreakdown bill = bill(NotraiusStatuses.LEASE_BREAKDOWN_OVERDUE);
+        LeaseDeposit advance = advance(bill.getLease(), new BigDecimal("6"), PolicyUnit.AMOUNT);
+        // Two global splits, each covering three months: the counter holds six.
+        advance.setStandardBalance(new BigDecimal("3"));
+        LeaseDepositSplit first = split(bill.getLease(), advance, 1);
+        LeaseDepositSplit second = split(bill.getLease(), advance, 2);
+        when(breakdownRepository.lockById(bill.getId())).thenReturn(Optional.of(bill));
+        when(depositRepository.findByLeaseIdOrderByPolicyCodeAsc(bill.getLease().getId()))
+                .thenReturn(List.of(advance));
+        when(splitRepository.findByLeaseIdAndStatusCodeOrderBySequenceAsc(
+                bill.getLease().getId(), NotraiusStatuses.LEASE_SPLIT_HELD))
+                .thenReturn(List.of(first, second));
+
+        assertThat(service.consume(bill.getId())).isTrue();
+
+        // The released split covered three months; the second split's three remain.
+        assertThat(advance.getBalance()).isEqualByComparingTo("3");
+    }
+
+    @Test
     @DisplayName("a refused release leaves the custody HELD and the row OVERDUE")
     void refusedReleaseFailsClosed() {
         LeaseBreakdown bill = bill(NotraiusStatuses.LEASE_BREAKDOWN_PENDING);
@@ -225,6 +247,7 @@ class AdvanceConsumptionServiceTest {
         deposit.setPolicy(policy);
         deposit.setType(type);
         deposit.setBalance(balance);
+        deposit.setStandardBalance(balance);
         deposit.setStatus(status(NotraiusStatuses.LEASE_DEPOSIT_HELD));
         deposit.setVersion(1);
         return deposit;

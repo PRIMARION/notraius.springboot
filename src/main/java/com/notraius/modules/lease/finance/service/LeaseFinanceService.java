@@ -194,7 +194,14 @@ public class LeaseFinanceService extends OwnershipGuard {
 
         boolean amountHull = advance.getPolicy() != null
                 && advance.getPolicy().getUnit() == PolicyUnit.AMOUNT;
-        advance.setBalance(amountHull ? BigDecimal.ZERO : balanceOf(advance).subtract(BigDecimal.ONE));
+        // balance is a unit-equivalent counter, not money: one UNITS split is
+        // one unit, while one AMOUNT global split covers the frozen
+        // month-equivalent stored as the deposit's standard. Zeroing it on
+        // every AMOUNT release lost the months of any additional global split
+        // a top-up had funded, so later consumptions saw an empty cushion
+        // while HELD custody still existed.
+        BigDecimal released = amountHull ? standardOf(advance) : BigDecimal.ONE;
+        advance.setBalance(balanceOf(advance).subtract(released).max(BigDecimal.ZERO));
         advance.setVersion(advance.getVersion() + 1);
         depositRepository.save(advance);
 
@@ -670,7 +677,13 @@ public class LeaseFinanceService extends OwnershipGuard {
             splitRepository.save(row);
         }
 
-        advance.setBalance(balanceOf(advance).add(BigDecimal.valueOf(units)));
+        // Same counter law at the other end: restoring one AMOUNT global split
+        // restores the whole months it covers (the frozen standard), not a
+        // single month.
+        BigDecimal restored = amountHull
+                ? standardOf(advance)
+                : BigDecimal.valueOf(units);
+        advance.setBalance(balanceOf(advance).add(restored));
         advance.setVersion(advance.getVersion() + 1);
         depositRepository.save(advance);
 
@@ -767,6 +780,17 @@ public class LeaseFinanceService extends OwnershipGuard {
 
     private BigDecimal balanceOf(LeaseDeposit deposit) {
         return deposit.getBalance() != null ? deposit.getBalance() : BigDecimal.ZERO;
+    }
+
+    /**
+     * The deposit's frozen unit-equivalent standard — the counter one full
+     * AMOUNT global split covers (birth's {@code value ÷ rentPerMonth}), kept
+     * beside the live balance so later top-ups never re-derive it from a
+     * pricing that may have changed.
+     */
+    private BigDecimal standardOf(LeaseDeposit deposit) {
+        return deposit.getStandardBalance() != null ? deposit.getStandardBalance()
+                : deposit.getBalance() != null ? deposit.getBalance() : BigDecimal.ZERO;
     }
 
     private int nextSequence(UUID leaseId) {
