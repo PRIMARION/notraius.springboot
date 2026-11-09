@@ -1,13 +1,11 @@
 package com.notraius.config.web;
 
 import org.junit.jupiter.api.Test;
-import org.primarion.module.configs.PublicOperationMatcher;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,207 +15,136 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The anonymous read tier is three agreements, and this test holds all three
- * together so they cannot drift apart silently:
- * <ol>
- *   <li>the path is named in {@code PUBLIC_GET_ENDPOINTS} (.env.example) — the
- *       filter lets it through without an {@code X-Service-Public-Key};</li>
- *   <li>the servlet chain permits it for GET — every listed path must reach a
- *       real handler, so a stale entry is caught here;</li>
- *   <li>the handler carries <b>no</b> {@code @PreAuthorize} — with no session
- *       there is no principal for an authority gate to resolve, so an
- *       annotation on an anonymous door can only deny the visitor again
- *       (or fail the boot: {@code PermissionSeeder} refuses an authority code
- *       that has no catalog row).</li>
- * </ol>
- * It also enforces the 401 rule: a path that is <i>not</i> public but sits
- * inside a public wildcard must be named in {@code AUTHENTICATED_GET_ENDPOINTS},
- * otherwise the chain permits it and method security answers 403 to a caller
- * who is merely unauthenticated.
+ * The anonymous read tier is ONE agreement now: the handler's declaration.
  * <p>
- * Sources are read, not models: the annotations in the controllers are the
- * truth this test compares the environment against.
+ * This test holds the new law from the source side:
+ * <ol>
+ *   <li>the door environment lists are gone — {@code PUBLIC_GET_ENDPOINTS},
+ *       {@code AUTHENTICATED_GET_ENDPOINTS} and friends no longer exist, so a
+ *       door cannot be opened from a config file;</li>
+ *   <li>every controller handler declares a rung (or inherits a class-level
+ *       one) — {@code DoorRegistry} enforces the same invariant at boot, this
+ *       keeps it visible in the build;</li>
+ *   <li>UNAUTHENTICATED is only ever declared by the intentional public read
+ *       controllers — a write surface or an owner page must not drift open;</li>
+ *   <li>the two sibling pages that used to need {@code AUTHENTICATED_GET_*}
+ *       (an owner page and a moderation queue) do not declare the open rung:
+ *       specificity resolves them to 401 by their own gate.</li>
+ * </ol>
  */
 class PublicSurfaceTest {
 
     private static final Path SOURCES = Path.of("src/main/java");
+    private static final Path CONTROLLERS = Path.of("src/main/java/com/notraius");
     private static final Path ENV = Path.of(".env.example");
-    private static final String OWN_PREFIX = "/api/v1/notraius/";
 
     private static final Pattern MAPPING =
             Pattern.compile("@(Get|Post|Put|Patch|Delete)Mapping(?:\\s*\\(([^)]*)\\))?");
     private static final Pattern CLASS_MAPPING =
             Pattern.compile("@RequestMapping\\s*\\(\\s*\"([^\"]*)\"");
-    private static final Pattern QUOTED = Pattern.compile("\"([^\"]*)\"");
+
+    /** Controllers that may legitimately declare the fully-open rung. */
+    private static final List<String> PUBLIC_READ_CONTROLLERS = List.of(
+            "PropertyController",
+            "PricingController",
+            "TermsController",
+            "RuleController",
+            "ReferenceController",
+            "PolicyController",
+            "VisitPricingController",
+            "PublicVerificationController");
 
     @Test
-    void everyAnonymousGetHandlerIsListedInTheEnvironment() throws IOException {
-        List<Handler> publicGets = handlers().stream()
-                .filter(Handler::get)
-                .filter(h -> !h.guarded())
-                .filter(h -> h.path().startsWith(OWN_PREFIX))
-                .toList();
-        List<String> configured = envList("PUBLIC_GET_ENDPOINTS").stream()
-                .filter(p -> p.startsWith(OWN_PREFIX))
-                .toList();
-
-        // Anti-vacuity: a parser that stopped finding handlers must fail loudly.
-        assertTrue(publicGets.size() >= 20,
-                "expected the public read tier to still be ~23 handlers, found " + publicGets.size());
-
-        for (Handler handler : publicGets) {
-            assertTrue(configured.stream().anyMatch(p -> PublicOperationMatcher.matches(p, handler.path())),
-                    handler + " has no @PreAuthorize (so it IS anonymous) but is not in "
-                            + "PUBLIC_GET_ENDPOINTS — either list it or annotate it");
+    void doorEnvironmentListsAreGone() throws IOException {
+        String env = Files.readString(ENV);
+        for (String banned : List.of("PUBLIC_GET_ENDPOINTS", "PUBLIC_POST_ENDPOINTS",
+                "PUBLIC_ENDPOINTS", "AUTHENTICATED_GET_ENDPOINTS", "KEY_AUTHORIZED_ENDPOINTS",
+                "PUBLIC_ACTUATOR_ENDPOINTS", "PUBLIC_AUTHENTICITY_ENDPOINTS")) {
+            assertFalse(env.contains(banned),
+                    banned + " still exists in .env.example — doors are declarations now");
         }
     }
 
     @Test
-    void everyListedGetPathReachesAPublicHandler() throws IOException {
-        List<Handler> gets = handlers().stream().filter(Handler::get).toList();
-        List<String> configured = envList("PUBLIC_GET_ENDPOINTS").stream()
-                .filter(p -> p.startsWith(OWN_PREFIX))
-                .toList();
-
-        for (String pattern : configured) {
-            List<Handler> matching = gets.stream()
-                    .filter(h -> PublicOperationMatcher.matches(pattern, h.path()))
-                    .toList();
-            assertFalse(matching.isEmpty(),
-                    pattern + " is listed as public but reaches no handler — a stale entry");
-            assertTrue(matching.stream().anyMatch(h -> !h.guarded()),
-                    pattern + " is listed as public but every handler it reaches has "
-                            + "@PreAuthorize, so anonymous callers are still denied");
-        }
-    }
-
-    @Test
-    void aProtectedSiblingInsideAPublicWildcardIsNamedAsAuthenticated() throws IOException {
-        List<String> publicPatterns = envList("PUBLIC_GET_ENDPOINTS").stream()
-                .filter(p -> p.startsWith(OWN_PREFIX))
-                .toList();
-        List<String> authenticated = envList("AUTHENTICATED_GET_ENDPOINTS");
-
-        for (Handler handler : handlers()) {
-            if (!handler.get() || !handler.guarded() || !handler.path().startsWith(OWN_PREFIX)) {
+    void everyHandlerDeclaresARung() throws IOException {
+        List<String> undeclared = new ArrayList<>();
+        for (Path file : javaFiles()) {
+            String source = Files.readString(file);
+            if (!source.contains("@RestController")) {
                 continue;
             }
-            boolean swallowed = publicPatterns.stream()
-                    .anyMatch(p -> PublicOperationMatcher.matches(p, handler.path()));
-            if (!swallowed) {
+            if (classLevelDeclaration(source)) {
                 continue;
             }
-            assertTrue(authenticated.contains(handler.path()),
-                    handler + " sits inside a public wildcard and keeps its @PreAuthorize, but is not "
-                            + "in AUTHENTICATED_GET_ENDPOINTS — an unauthenticated caller would get 403 "
-                            + "instead of 401");
-        }
-    }
-
-    @Test
-    void noHandlerDeclaresAnAuthorityForAnonymousCallers() throws IOException {
-        try (Stream<Path> files = Files.walk(SOURCES)) {
-            for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
-                String source = Files.readString(file);
-                assertFalse(source.contains("UNAUTHENTICATED"),
-                        file + " names an anonymous authority tier. Anonymous means no @PreAuthorize "
-                                + "at all: there is no principal to resolve, and an authority code "
-                                + "without a catalog row fails the boot.");
-            }
-        }
-    }
-
-    @Test
-    void theParserSeesTheWholeSurface() throws IOException {
-        List<Handler> all = handlers();
-        assertTrue(all.size() >= 120,
-                "expected the whole controller surface (~150 handlers), parsed " + all.size());
-        assertTrue(all.stream().anyMatch(Handler::guarded),
-                "no @PreAuthorize was detected at all — the parser is broken, not the code");
-        assertTrue(all.stream().anyMatch(h -> !h.guarded()),
-                "every handler looks guarded — the parser is broken, not the code");
-    }
-
-    // ── source parsing ────────────────────────────────────────────────────
-
-    private record Handler(String source, String path, String method, boolean guarded) {
-        boolean get() {
-            return "GET".equals(method);
-        }
-
-        @Override
-        public String toString() {
-            return method + " " + path + " (" + source + ")";
-        }
-    }
-
-    private static List<Handler> handlers() throws IOException {
-        List<Handler> handlers = new ArrayList<>();
-        try (Stream<Path> files = Files.walk(SOURCES)) {
-            for (Path file : files.filter(p -> p.toString().endsWith("Controller.java")).toList()) {
-                String source = Files.readString(file);
-                String base = classBasePath(source);
-                Matcher mapping = MAPPING.matcher(source);
-                while (mapping.find()) {
-                    String own = extractPath(mapping.group(2));
-                    handlers.add(new Handler(file.getFileName().toString(),
-                            join(base, own), mapping.group(1).toUpperCase(), guarded(source, mapping)));
+            Matcher mapping = MAPPING.matcher(source);
+            while (mapping.find()) {
+                String block = source.substring(mapping.end(),
+                        Math.min(source.length(), mapping.end() + 900));
+                int signature = firstSignature(block);
+                String declarationWindow = signature < 0 ? block : block.substring(0, signature);
+                if (!declarationWindow.contains("@PreAuthorize")) {
+                    undeclared.add(file.getFileName() + " near " + mapping.group());
                 }
             }
         }
-        return handlers;
+        assertTrue(undeclared.isEmpty(),
+                "handlers with no rung declaration (DoorRegistry would fail the boot): " + undeclared);
     }
 
-    /**
-     * A handler is guarded when a {@code @PreAuthorize} sits in its own
-     * annotation block — from the previous member boundary to the method's
-     * opening brace — whichever side of the mapping annotation it is on.
-     */
-    private static boolean guarded(String source, Matcher mapping) {
-        int boundary = Math.max(source.lastIndexOf('}', mapping.start()),
-                source.lastIndexOf(';', mapping.start()));
-        int brace = source.indexOf('{', mapping.end());
-        String window = source.substring(Math.max(boundary, 0) + 1,
-                brace < 0 ? source.length() : brace);
-        return window.contains("@PreAuthorize");
-    }
-
-    private static String classBasePath(String source) {
-        Matcher matcher = CLASS_MAPPING.matcher(source);
-        return matcher.find() ? matcher.group(1) : "";
-    }
-
-    private static String extractPath(String annotationArguments) {
-        if (annotationArguments == null) {
-            return "";
+    @Test
+    void onlyPublicReadControllersDeclareUnauthenticated() throws IOException {
+        for (Path file : javaFiles()) {
+            String source = Files.readString(file);
+            if (!source.contains("'UNAUTHENTICATED'")) {
+                continue;
+            }
+            assertTrue(PUBLIC_READ_CONTROLLERS.contains(strip(file.getFileName().toString())),
+                    file.getFileName() + " declares UNAUTHENTICATED but is not a public read controller");
         }
-        Matcher quoted = QUOTED.matcher(annotationArguments);
-        return quoted.find() ? quoted.group(1) : "";
     }
 
-    private static String join(String base, String own) {
-        if (own.isEmpty()) {
-            return base;
-        }
-        if (own.startsWith("/")) {
-            return base + own;
-        }
-        return base + "/" + own;
-    }
-
-    private static List<String> envList(String key) throws IOException {
-        for (String line : Files.readAllLines(ENV)) {
-            if (line.startsWith(key + "=")) {
-                String value = line.substring(key.length() + 1).trim();
-                if (value.isEmpty()) {
-                    return List.of();
+    @Test
+    void authenticatedSiblingPagesDoNotDeclareTheOpenRung() throws IOException {
+        for (Path file : javaFiles()) {
+            String source = Files.readString(file);
+            Matcher m = MAPPING.matcher(source);
+            while (m.find()) {
+                String path = m.group(2) == null ? "" : m.group(2);
+                if (!path.contains("/mine") && !path.contains("submissions")) {
+                    continue;
                 }
-                return Arrays.stream(value.split(","))
-                        .map(String::trim)
-                        .filter(entry -> !entry.isEmpty())
-                        .toList();
+                String block = source.substring(m.end(),
+                        Math.min(source.length(), m.end() + 500));
+                assertFalse(block.contains("'UNAUTHENTICATED'"),
+                        path + " sits inside a public wildcard but must keep its own gate "
+                                + "(specificity gives the named door priority, so it answers 401)");
             }
         }
-        throw new AssertionError(key + " is missing from .env.example");
+    }
+
+    // ── source scanning ─────────────────────────────────────────────────────
+
+    private List<Path> javaFiles() throws IOException {
+        try (Stream<Path> stream = Files.walk(CONTROLLERS)) {
+            return stream.filter(p -> p.toString().endsWith(".java")).toList();
+        }
+    }
+
+    private static String strip(String name) {
+        return name.endsWith(".java") ? name.substring(0, name.length() - 5) : name;
+    }
+
+    private static boolean classLevelDeclaration(String source) {
+        int classIndex = source.indexOf("public class");
+        if (classIndex < 0) {
+            return false;
+        }
+        int from = Math.max(0, classIndex - 600);
+        return source.substring(from, classIndex).contains("@PreAuthorize");
+    }
+
+    private static int firstSignature(String block) {
+        Matcher m = Pattern.compile("(?m)^\\s*(public|protected)\\s+[^;=]*\\(").matcher(block);
+        return m.find() ? m.start() : -1;
     }
 }
