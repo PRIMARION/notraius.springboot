@@ -29,11 +29,25 @@ WHERE att.id = ranked.id;
 
 -- Live-row uniqueness: one slot per parent. This host's lifecycle is
 -- status-driven (ATTACHMENTS/ACTIVE and ATTACHMENTS/DELETED in the notraius
--- registry); live rows are those not carrying the DELETED status. Postgres
--- does not allow subqueries in index predicates, so the seeded
--- ATTACHMENTS/DELETED UUID (V2 seeders) is inlined — same value the host's
--- AttachmentStatusResolver resolves at runtime.
-CREATE UNIQUE INDEX uq_attachments_live_sequence
-    ON notraius.attachments (entity_id, reference_id, sequence)
-    WHERE sequence IS NOT NULL
-      AND status_id IS DISTINCT FROM 'e48ab746-224f-4176-b896-b635fe20cb46'::uuid;
+-- registry); live rows are those not carrying the DELETED status.
+-- Postgres does not allow subqueries in index predicates, and status ids are
+-- generated (V2 uses gen_random_uuid()), so the DELETED id is resolved here
+-- and inlined through dynamic SQL — the same row AttachmentStatusResolver
+-- resolves at runtime, without pinning a UUID in the migration.
+
+DO $$
+DECLARE deleted_status uuid;
+BEGIN
+    SELECT s.id INTO deleted_status
+    FROM notraius.statuses s
+    JOIN notraius.entities e ON e.id = s.entity_id
+    WHERE e.code = 'ATTACHMENTS' AND s.code = 'DELETED';
+    IF deleted_status IS NULL THEN
+        RAISE EXCEPTION 'ATTACHMENTS/DELETED status is missing from notraius';
+    END IF;
+    EXECUTE format(
+        'CREATE UNIQUE INDEX uq_attachments_live_sequence ON notraius.attachments '
+        '(entity_id, reference_id, sequence) '
+        'WHERE sequence IS NOT NULL AND status_id IS DISTINCT FROM %L::uuid',
+        deleted_status);
+END $$;

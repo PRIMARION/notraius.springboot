@@ -12,13 +12,11 @@ ALTER TABLE access.consents ADD CONSTRAINT chk_consents_entity
 
 -- 3) Registry SEATS
 INSERT INTO notraius.entities (id, created_at, updated_at, code)
-VALUES ('5f8a2c1e-9b3d-4e6f-8a7c-1d2e3f4a5b6c', now(), now(), 'SEATS');
+VALUES (gen_random_uuid(), now(), now(), 'SEATS');
 INSERT INTO notraius.statuses (id, created_at, updated_at, code, description, entity_id)
-VALUES ('6a9b3d2f-0c4e-4f70-9b8d-2e3f4a5b6c7d', now(), now(), 'ACTIVE',
-        'Seat is active and delegating', '5f8a2c1e-9b3d-4e6f-8a7c-1d2e3f4a5b6c');
+VALUES (gen_random_uuid(), now(), now(), 'ACTIVE', 'Seat is active and delegating', (SELECT id FROM notraius.entities WHERE code = 'SEATS'));
 INSERT INTO notraius.statuses (id, created_at, updated_at, code, description, entity_id)
-VALUES ('7b0c4e3a-1d5f-4081-8c9e-3f4a5b6c7d8e', now(), now(), 'SUSPENDED',
-        'Seat suspended — every delegation on it is dead', '5f8a2c1e-9b3d-4e6f-8a7c-1d2e3f4a5b6c');
+VALUES (gen_random_uuid(), now(), now(), 'SUSPENDED', 'Seat suspended — every delegation on it is dead', (SELECT id FROM notraius.entities WHERE code = 'SEATS'));
 
 -- 4) access.seats
 CREATE TABLE access.seats (
