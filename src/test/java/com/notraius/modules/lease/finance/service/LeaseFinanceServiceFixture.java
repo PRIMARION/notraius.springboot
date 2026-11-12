@@ -5,7 +5,6 @@ import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.integration.PayPaymentClient;
 import com.notraius.common.integration.ReputationAssessmentClient;
 import com.notraius.common.services.StatusResolver;
-import com.notraius.database.repositories.asset.PropertyPolicyValueRepository;
 import com.notraius.database.repositories.lease.LeaseBreakdownRepository;
 import com.notraius.database.repositories.lease.LeaseDepositRepository;
 import com.notraius.database.repositories.lease.LeaseDepositSplitRepository;
@@ -30,7 +29,6 @@ final class LeaseFinanceServiceFixture {
     private LeaseDepositSplitRepository splitRepository = mock(LeaseDepositSplitRepository.class);
     private LeaseRepository leaseRepository = mock(LeaseRepository.class);
     private LeaseTopUpRepository topUpRepository = mock(LeaseTopUpRepository.class);
-    private PropertyPolicyValueRepository valueRepository = mock(PropertyPolicyValueRepository.class);
     private PayPaymentClient payPaymentClient = mock(PayPaymentClient.class);
     private ReputationAssessmentClient assessmentClient = mock(ReputationAssessmentClient.class);
     private ActivityRepository activityRepository = mock(ActivityRepository.class);
@@ -72,11 +70,6 @@ final class LeaseFinanceServiceFixture {
         return this;
     }
 
-    LeaseFinanceServiceFixture valueRepository(PropertyPolicyValueRepository value) {
-        this.valueRepository = value;
-        return this;
-    }
-
     LeaseFinanceServiceFixture payPaymentClient(PayPaymentClient value) {
         this.payPaymentClient = value;
         return this;
@@ -109,7 +102,7 @@ final class LeaseFinanceServiceFixture {
 
     LeaseFinanceService build() {
         return new LeaseFinanceService(breakdownRepository, depositRepository, splitRepository,
-                leaseRepository, topUpRepository, valueRepository, payPaymentClient,
+                leaseRepository, topUpRepository, payPaymentClient,
                 assessmentClient, activityRepository, statusResolver, stateService,
                 financeMapper, new AuditTrail(objectMapper, auditLogWriter));
     }

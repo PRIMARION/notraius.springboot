@@ -4,16 +4,15 @@ import com.notraius.common.integration.PayPaymentClient;
 import com.notraius.common.services.StatusResolver;
 import com.notraius.database.entities.asset.Pricing;
 import com.notraius.database.entities.asset.Property;
-import com.notraius.database.entities.asset.PropertyPolicyValue;
 import com.notraius.database.entities.config.Policy;
 import com.notraius.database.entities.config.PolicyUnit;
 import com.notraius.database.entities.lease.Lease;
 import com.notraius.database.entities.lease.LeaseDeposit;
+import com.notraius.database.entities.lease.LeaseDepositSplit;
 import com.notraius.database.entities.lease.LeaseTopUp;
 import com.notraius.database.entities.reference.Entities;
 import com.notraius.database.entities.reference.Status;
 import com.notraius.database.entities.reference.Type;
-import com.notraius.database.repositories.asset.PropertyPolicyValueRepository;
 import com.notraius.database.repositories.lease.LeaseDepositRepository;
 import com.notraius.database.repositories.lease.LeaseDepositSplitRepository;
 import com.notraius.database.repositories.lease.LeaseRepository;
@@ -62,7 +61,6 @@ class AdvanceTopUpServiceTest {
     @Mock private LeaseDepositRepository depositRepository;
     @Mock private LeaseDepositSplitRepository splitRepository;
     @Mock private LeaseTopUpRepository topUpRepository;
-    @Mock private PropertyPolicyValueRepository valueRepository;
     @Mock private PayPaymentClient payPaymentClient;
     @Mock private StatusResolver statusResolver;
     @Mock private LeaseStateService stateService;
@@ -77,7 +75,6 @@ class AdvanceTopUpServiceTest {
                 .depositRepository(depositRepository)
                 .splitRepository(splitRepository)
                 .topUpRepository(topUpRepository)
-                .valueRepository(valueRepository)
                 .payPaymentClient(payPaymentClient)
                 .statusResolver(statusResolver)
                 .stateService(stateService)
@@ -136,15 +133,17 @@ class AdvanceTopUpServiceTest {
         advance.setStatus(status(NotraiusStatuses.LEASE_DEPOSIT_HELD));
         advance.setVersion(1);
 
-        PropertyPolicyValue value = new PropertyPolicyValue();
-        value.setValue(new BigDecimal("3000.00"));
+        LeaseDepositSplit born = new LeaseDepositSplit();
+        born.setDeposit(advance);
+        born.setAmount(new BigDecimal("3000.00"));
+        born.setSequence(1);
 
         when(leaseRepository.findById(lease.getId())).thenReturn(Optional.of(lease));
         when(depositRepository.findByLeaseIdOrderByPolicyCodeAsc(lease.getId()))
                 .thenReturn(List.of(advance));
-        when(valueRepository.findByPricingIdAndPolicyId(pricing.getId(), policy.getId()))
-                .thenReturn(Optional.of(value));
-        when(splitRepository.findByLeaseIdOrderBySequenceAsc(lease.getId())).thenReturn(List.of());
+        // The live policy now says 9,999: the top-up must still price the
+        // 3,000 this lease actually funded, not today's offer.
+        when(splitRepository.findByLeaseIdOrderBySequenceAsc(lease.getId())).thenReturn(List.of(born));
         when(payPaymentClient.createCustodialMatrix(eq(TENANT), eq(CURRENCY), anyString(), any(), anyList()))
                 .thenReturn(new PayPaymentClient.PaymentRef(PAYMENT, new BigDecimal("3000.00"),
                         "EUR", "CAPTURED", "HELD", List.of(
@@ -160,6 +159,7 @@ class AdvanceTopUpServiceTest {
         ArgumentCaptor<LeaseTopUp> saved = ArgumentCaptor.forClass(LeaseTopUp.class);
         verify(topUpRepository, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
         assertThat(saved.getValue().getStatus().getCode()).isEqualTo(NotraiusStatuses.LEASE_TOPUP_FUNDED);
+        assertThat(saved.getValue().getAmount()).isEqualByComparingTo("3000.00");
         verify(stateService).evaluateDeposit(lease);
     }
 

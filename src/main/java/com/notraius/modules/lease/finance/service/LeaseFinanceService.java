@@ -6,7 +6,6 @@ import com.notraius.common.NotraiusErrors;
 import com.notraius.common.integration.PayPaymentClient;
 import com.notraius.common.integration.ReputationAssessmentClient;
 import com.notraius.common.services.StatusResolver;
-import com.notraius.database.entities.asset.PropertyPolicyValue;
 import com.notraius.database.entities.config.PolicyUnit;
 import com.notraius.database.entities.lease.Lease;
 import com.notraius.database.entities.lease.LeaseBreakdown;
@@ -14,7 +13,6 @@ import com.notraius.database.entities.lease.LeaseDeposit;
 import com.notraius.database.entities.lease.LeaseDepositSplit;
 import com.notraius.database.entities.lease.LeaseTopUp;
 import com.notraius.database.entities.reference.Entities;
-import com.notraius.database.repositories.asset.PropertyPolicyValueRepository;
 import com.notraius.database.repositories.lease.LeaseBreakdownRepository;
 import com.notraius.database.repositories.lease.LeaseDepositRepository;
 import com.notraius.database.repositories.lease.LeaseDepositSplitRepository;
@@ -85,7 +83,6 @@ public class LeaseFinanceService extends OwnershipGuard {
     private final LeaseDepositSplitRepository splitRepository;
     private final LeaseRepository leaseRepository;
     private final LeaseTopUpRepository topUpRepository;
-    private final PropertyPolicyValueRepository valueRepository;
     private final PayPaymentClient payPaymentClient;
     private final ReputationAssessmentClient assessmentClient;
     private final ActivityRepository activityRepository;
@@ -103,7 +100,6 @@ public class LeaseFinanceService extends OwnershipGuard {
             LeaseDepositSplitRepository splitRepository,
             LeaseRepository leaseRepository,
             LeaseTopUpRepository topUpRepository,
-            PropertyPolicyValueRepository valueRepository,
             PayPaymentClient payPaymentClient,
             ReputationAssessmentClient assessmentClient,
             ActivityRepository activityRepository,
@@ -116,7 +112,6 @@ public class LeaseFinanceService extends OwnershipGuard {
         this.splitRepository = splitRepository;
         this.leaseRepository = leaseRepository;
         this.topUpRepository = topUpRepository;
-        this.valueRepository = valueRepository;
         this.payPaymentClient = payPaymentClient;
         this.assessmentClient = assessmentClient;
         this.activityRepository = activityRepository;
@@ -606,7 +601,7 @@ public class LeaseFinanceService extends OwnershipGuard {
                             ? "An AMOUNT-valued advance restores exactly one global split"
                             : "A top-up restores a whole, positive number of units");
         }
-        BigDecimal perUnit = amountHull ? amountValue(lease, advance) : perUnitRent(lease);
+        BigDecimal perUnit = amountHull ? frozenAmountValue(lease, advance) : perUnitRent(lease);
         BigDecimal amount = perUnit.multiply(BigDecimal.valueOf(units));
 
         UUID currencyId = lease.getPricing().getProperty() != null
@@ -738,18 +733,26 @@ public class LeaseFinanceService extends OwnershipGuard {
                 (SPLIT_REFERENCE_PREFIX + topUpId + ":" + unit).getBytes(StandardCharsets.UTF_8));
     }
 
-    private BigDecimal amountValue(Lease lease, LeaseDeposit advance) {
-        PropertyPolicyValue value = valueRepository
-                .findByPricingIdAndPolicyId(lease.getPricing().getId(), advance.getPolicy().getId())
-                .orElseThrow(() -> new ConflictException(NotraiusErrors.LEASE_TOPUP_INVALID,
-                        "Pricing " + lease.getPricing().getId()
-                                + " carries no value for the AMOUNT standard '" + advance.getPolicy().getCode() + "'"));
-        if (value.getValue() == null || value.getValue().signum() <= 0) {
+    /**
+     * The AMOUNT figure this lease actually funded, read from its oldest born
+     * escrow. A top-up restores the custody the tenancy lost, so repricing it
+     * from today's policy value would charge a different contract. A deposit
+     * with no born escrow has no frozen figure to restore; refuse instead of
+     * guessing one from the live chain.
+     */
+    private BigDecimal frozenAmountValue(Lease lease, LeaseDeposit advance) {
+        if (advance.getId() == null) {
             throw new ConflictException(NotraiusErrors.LEASE_TOPUP_INVALID,
-                    "The AMOUNT standard '" + advance.getPolicy().getCode() + "' values "
-                            + value.getValue() + ", which cannot fund custody");
+                    "The ADVANCE deposit of lease " + lease.getId() + " has no identity to price from");
         }
-        return value.getValue();
+        return splitRepository.findByLeaseIdOrderBySequenceAsc(lease.getId()).stream()
+                .filter(split -> split.getDeposit() != null
+                        && advance.getId().equals(split.getDeposit().getId()))
+                .map(LeaseDepositSplit::getAmount)
+                .filter(amount -> amount != null && amount.signum() > 0)
+                .findFirst()
+                .orElseThrow(() -> new ConflictException(NotraiusErrors.LEASE_TOPUP_INVALID,
+                        "Lease " + lease.getId() + " has no born AMOUNT escrow; its frozen figure is unknown"));
     }
 
     /**
