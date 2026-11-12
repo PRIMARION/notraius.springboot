@@ -173,12 +173,25 @@ public class PayPaymentClient {
         return payment;
     }
 
-    /** Pay's truth about a reference — the sweep's only source of truth. */
+    /**
+     * Pay's truth about a reference — the sweep's only source of truth.
+     * <p>
+     * A 404 is an answer: pay has no payment for this reference, so the caller
+     * must be able to take the "nothing stands" branch. Letting the default
+     * error handler throw turned every ordinary absence into an outage and
+     * aborted the sweep before it could decide.
+     */
     public Optional<PaymentRef> findByReference(UUID referenceId) {
+        if (referenceId == null) {
+            return Optional.empty();
+        }
         PaymentRef payment = restClient.get()
                 .uri(path(GET_BY_REFERENCE), referenceId)
                 .headers(h -> h.setAll(serviceAuthHeaders.forTarget(properties.getPlatformTargetPay())))
                 .retrieve()
+                .onStatus(status -> status.value() == 404, (request, response) -> {
+                    // No such reference: the empty body below is the answer.
+                })
                 .body(PaymentRef.class);
         return Optional.ofNullable(payment).filter(ref -> ref.id() != null);
     }
