@@ -44,7 +44,11 @@ import javax.sql.DataSource;
                 "org.primarion.module.access.consent.database.repositories",
                 "org.primarion.module.access.seat.database.repositories",
                 "org.primarion.module.infra.webhook.database.repositories",
-                "org.primarion.module.event.database.repositories"},
+                "org.primarion.module.event.database.repositories",
+                "org.primarion.module.marketplace.reference.database.repositories",
+                "org.primarion.module.marketplace.store.database.repositories",
+                "org.primarion.module.marketplace.variant.database.repositories",
+                "org.primarion.module.marketplace.card.database.repositories"},
         entityManagerFactoryRef = "entityManagerFactory",
         transactionManagerRef = "transactionManager",
         considerNestedRepositories = true)
@@ -76,7 +80,11 @@ public class NotraiusJpaConfig {
                         "org.primarion.module.access.consent.database.entities",
                         "org.primarion.module.access.seat.database.entities",
                         "org.primarion.module.infra.webhook.database.entities",
-                        "org.primarion.module.event.database.entities")
+                        "org.primarion.module.event.database.entities",
+                        "org.primarion.module.marketplace.reference.database.entities",
+                        "org.primarion.module.marketplace.store.database.entities",
+                        "org.primarion.module.marketplace.variant.database.entities",
+                        "org.primarion.module.marketplace.card.database.entities")
                 .persistenceUnit("notraius")
                 .build();
     }

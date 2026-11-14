@@ -23,6 +23,7 @@ import org.primarion.module.communication.chat.ChatModule;
 import org.primarion.module.infra.lookups.LookupModule;
 import org.primarion.module.infra.flowmap.config.FlowmapModule;
 import org.primarion.module.event.EventModule;
+import org.primarion.module.marketplace.MarketplaceModule;
 import org.primarion.module.subscription.SubscriptionModule;
 import org.primarion.module.infra.webhook.WebhookModule;
 import org.primarion.module.infra.anomaly.AnomalyModule;
@@ -74,6 +75,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
     CommunicationModule.class,
     EventModule.class,
     SubscriptionModule.class,
+    MarketplaceModule.class,
     WebhookModule.class,
     AnomalyModule.class,
     IdempotencyModule.class,
