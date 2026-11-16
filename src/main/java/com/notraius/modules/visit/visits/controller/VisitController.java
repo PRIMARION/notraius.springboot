@@ -14,6 +14,7 @@ import com.notraius.modules.visit.visits.dto.response.VisitAssessmentResponse;
 import com.notraius.modules.visit.visits.dto.response.VisitResponse;
 import com.notraius.modules.visit.visits.service.VisitService;
 import jakarta.validation.Valid;
+import org.primarion.module.infra.export.formats.ExportFormat;
 import org.primarion.module.utils.http.PaginatedResponse;
 import org.primarion.module.utils.security.SecurityContextUtils;
 import org.springframework.data.domain.Page;
@@ -32,7 +33,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -82,6 +85,42 @@ public class VisitController {
     public ResponseEntity<VisitResponse> getVisit(@PathVariable UUID visitId) {
         return ResponseEntity.ok(visitService.getVisit(visitId,
                 SecurityContextUtils.getCurrentUserId()));
+    }
+
+    /**
+     * The visit's receipt as a document: the funded terms, the payment reference
+     * and the state the visit stands in. A party's own copy of what they agreed
+     * to, in the format they ask for; its own authority pair.
+     */
+    @GetMapping("/{visitId}/export")
+    @PreAuthorize("@authz.authority('PERSONAL', 'GTE', 'VISITS', 'EXPORT')")
+    public ResponseEntity<byte[]> exportVisit(@PathVariable UUID visitId,
+                                              @RequestParam(defaultValue = "pdf") String format) {
+        VisitResponse visit = visitService.getVisit(visitId,
+                SecurityContextUtils.getCurrentUserId());
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("visit", visit.getId());
+        row.put("visitor", visit.getVisitorId());
+        row.put("assignee", visit.getAssigneeId());
+        row.put("owner", visit.getOwnerId());
+        row.put("property", visit.getPropertyId());
+        row.put("status", visit.getStatusCode());
+        row.put("amount", visit.getAmount());
+        row.put("currency", visit.getCurrencyId());
+        row.put("payment", visit.getPaymentId());
+        row.put("from", visit.getFromDate());
+        row.put("to", visit.getToDate());
+        row.put("startedAt", visit.getStartedAt());
+        row.put("startConfirmedAt", visit.getStartConfirmedAt());
+        row.put("completedAt", visit.getCompletedAt());
+        ExportFormat exportFormat = ExportFormat.fromString(format);
+        String filename = "visit-" + visitId;
+        byte[] data = ExportFormat.getEncoder(exportFormat).encode(List.of(row), filename);
+        return ResponseEntity.ok()
+                .header("Content-Type", ExportFormat.getEncoder(exportFormat).getContentType())
+                .header("Content-Disposition", "attachment; filename=" + filename
+                        + "." + ExportFormat.getEncoder(exportFormat).getFileExtension())
+                .body(data);
     }
 
     /**

@@ -176,6 +176,8 @@ public final class NotraiusActivities {
         public static final String DELETE = "PRICING.DELETE";
         public static final String LIST   = "PRICING.LIST";
         public static final String GET    = "PRICING.GET";
+        /** The owner's price sheet — a document, not a read of one row. */
+        public static final String EXPORT = "PRICING.EXPORT";
     }
 
     // ── Visits (PLAN 5.1–5.5) ────────────────────────────────────────────
@@ -193,6 +195,8 @@ public final class NotraiusActivities {
         public static final String LIST_MINE = "VISITS.LIST_MINE";
         /** The agent's own page: visits assigned to the caller, any status. */
         public static final String LIST_ASSIGNED = "VISITS.LIST_ASSIGNED";
+        /** The visit's receipt as a document (PDF/CSV). */
+        public static final String EXPORT = "VISITS.EXPORT";
         /** A clock ran out and the visitor was refunded. */
         public static final String EXPIRE   = "VISITS.EXPIRE";
         /** The sweep re-read a funding it had left without an answer. */
@@ -291,6 +295,8 @@ public final class NotraiusActivities {
         public static final String GET = "LEASES.GET";
         public static final String LIST_MINE = "LEASES.LIST_MINE";
         public static final String LIST_OWNED = "LEASES.LIST_OWNED";
+        /** The lease agreement as a document (PDF/CSV). */
+        public static final String EXPORT = "LEASES.EXPORT";
 
         /** 6.2: the owner's commitment, and the conditions stage it opens. */
         public static final String CONFIRM = "LEASES.CONFIRM";
@@ -341,7 +347,7 @@ public final class NotraiusActivities {
         public static final String IMPORT_REFUSE = "LEASES.IMPORT_REFUSE";
     }
     // ── Public read tier ─────────────────────────────────────────────
-    // Every anonymous read declares its own pair (UNAUTHENTICATED door):
+    // Every public read declares its own pair (UNAUTHENTICATED public door):
     // one operation per surface, never a second policy on the owner ops.
     public static final class Public {
         private Public() {}

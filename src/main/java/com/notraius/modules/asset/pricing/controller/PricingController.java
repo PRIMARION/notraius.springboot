@@ -13,6 +13,7 @@ import com.notraius.modules.asset.pricing.dto.request.PricingWindowRequest;
 import com.notraius.modules.asset.pricing.dto.response.PricingResponse;
 import com.notraius.modules.asset.pricing.service.PricingService;
 import jakarta.validation.Valid;
+import org.primarion.module.infra.export.formats.ExportFormat;
 import org.primarion.module.utils.security.SecurityContextUtils;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -29,7 +30,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -45,9 +48,10 @@ import java.util.UUID;
  * EXPIRED.
  * <p>
  * <b>Both reads are public doors.</b> They declare the {@code UNAUTHENTICATED}
- * rung; {@code DoorRegistry} turns that one declaration into the skipped key
- * floor and the chain's {@code permitAll}. Each call pays an IP-scoped
- * {@link PublicReadThrottle} hit, and the service still hides a price that is
+ * rung; {@code DoorRegistry} turns that one declaration into the required
+ * public-key floor and the chain's {@code permitAll}. Each call pays an
+ * IP-scoped {@link PublicReadThrottle} hit, and the service still hides a price
+ * that is
  * not live from a caller who may not see it.
  */
 @RestController
@@ -82,6 +86,41 @@ public class PricingController {
      * stays with the owner and moderation — a retired amount is not the market's
      * current answer.
      */
+    /**
+     * The owner's price sheet as a document: every pricing on the property, one
+     * row each. Behind the owner's authority, not the public read door — a sheet
+     * is a private working document, even though each row inside it is public.
+     */
+    @GetMapping("/export")
+    @PreAuthorize("@authz.authority('PERSONAL', 'GTE', 'PRICING', 'EXPORT')")
+    public ResponseEntity<byte[]> exportPricings(@RequestParam UUID propertyId,
+                                                 @RequestParam(defaultValue = "pdf") String format) {
+        List<PricingResponse> pricings = pricingService.listPricings(propertyId,
+                SecurityContextUtils.getCurrentUserId());
+        List<Map<String, Object>> rows = pricings.stream().map(pricing -> {
+            Map<String, Object> row = new LinkedHashMap<String, Object>();
+            row.put("pricing", pricing.getId());
+            row.put("property", pricing.getPropertyId());
+            row.put("type", pricing.getTypeCode());
+            row.put("amount", pricing.getAmount());
+            row.put("currency", pricing.getCurrencyId());
+            row.put("checkable", pricing.isCheckable());
+            row.put("status", pricing.getStatusCode());
+            row.put("from", pricing.getFromDate());
+            row.put("to", pricing.getToDate());
+            row.put("version", pricing.getVersion());
+            return row;
+        }).toList();
+        ExportFormat exportFormat = ExportFormat.fromString(format);
+        String filename = "pricing-sheet-" + propertyId;
+        byte[] data = ExportFormat.getEncoder(exportFormat).encode(rows, filename);
+        return ResponseEntity.ok()
+                .header("Content-Type", ExportFormat.getEncoder(exportFormat).getContentType())
+                .header("Content-Disposition", "attachment; filename=" + filename
+                        + "." + ExportFormat.getEncoder(exportFormat).getFileExtension())
+                .body(data);
+    }
+
     @GetMapping("/{pricingId}")
     @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PRICING_GET')")
     public ResponseEntity<PricingResponse> getPricing(

@@ -9,9 +9,11 @@ import com.notraius.modules.lease.agreement.dto.request.LeaseConditionRequest;
 import com.notraius.modules.lease.agreement.dto.request.LeaseCreateRequest;
 import com.notraius.modules.lease.agreement.dto.request.LeaseImportRequest;
 import com.notraius.modules.lease.agreement.dto.response.LeaseConditionResponse;
+import com.notraius.modules.lease.agreement.dto.response.LeaseDepositResponse;
 import com.notraius.modules.lease.agreement.dto.response.LeaseResponse;
 import com.notraius.modules.lease.agreement.service.LeaseAgreementService;
 import jakarta.validation.Valid;
+import org.primarion.module.infra.export.formats.ExportFormat;
 import org.primarion.module.utils.http.PaginatedResponse;
 import org.primarion.module.utils.security.SecurityContextUtils;
 import org.springframework.data.domain.Page;
@@ -29,7 +31,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -76,6 +80,56 @@ public class LeaseController {
     public ResponseEntity<LeaseResponse> get(@PathVariable UUID leaseId) {
         return ResponseEntity.ok(leaseService.getLease(leaseId,
                 SecurityContextUtils.getCurrentUserId()));
+    }
+
+    /**
+     * The lease agreement as a document — the same figures the GET returns,
+     * flattened one row per deposit so the PDF/CSV is a readable contract sheet.
+     * Its own authority pair because producing a document is its own act, not a
+     * second read door on the row.
+     */
+    @GetMapping("/{leaseId}/export")
+    @PreAuthorize("@authz.authority('PERSONAL', 'GTE', 'LEASES', 'EXPORT')")
+    public ResponseEntity<byte[]> export(@PathVariable UUID leaseId,
+                                         @RequestParam(defaultValue = "pdf") String format) {
+        LeaseResponse lease = leaseService.getLease(leaseId,
+                SecurityContextUtils.getCurrentUserId());
+        List<Map<String, Object>> rows = lease.getDeposits().isEmpty()
+                ? List.of(leaseExportRow(lease, null))
+                : lease.getDeposits().stream()
+                        .map(deposit -> leaseExportRow(lease, deposit))
+                        .toList();
+        ExportFormat exportFormat = ExportFormat.fromString(format);
+        String filename = "lease-" + leaseId;
+        byte[] data = ExportFormat.getEncoder(exportFormat).encode(rows, filename);
+        return ResponseEntity.ok()
+                .header("Content-Type", ExportFormat.getEncoder(exportFormat).getContentType())
+                .header("Content-Disposition", "attachment; filename=" + filename
+                        + "." + ExportFormat.getEncoder(exportFormat).getFileExtension())
+                .body(data);
+    }
+
+    private Map<String, Object> leaseExportRow(LeaseResponse lease,
+                                               LeaseDepositResponse deposit) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("lease", lease.getId());
+        row.put("tenant", lease.getTenantId());
+        row.put("owner", lease.getOwnerId());
+        row.put("property", lease.getPropertyId());
+        row.put("status", lease.getStatus());
+        row.put("rent", lease.getRentAmount());
+        row.put("from", lease.getFromDate());
+        row.put("to", lease.getToDate());
+        row.put("matrixTotal", lease.getMatrixTotal());
+        if (deposit != null) {
+            row.put("policy", deposit.getPolicyCode());
+            row.put("kind", deposit.getTypeCode());
+            row.put("balance", deposit.getBalance());
+            row.put("splits", deposit.getSplits());
+            row.put("depositAmount", deposit.getAmount());
+            row.put("depositStatus", deposit.getStatus());
+        }
+        return row;
     }
 
     /**
