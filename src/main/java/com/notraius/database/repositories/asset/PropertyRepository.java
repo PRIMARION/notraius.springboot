@@ -45,6 +45,43 @@ public interface PropertyRepository extends JpaRepository<Property, UUID> {
                           @Param("search") String search,
                           Pageable pageable);
 
+    /**
+     * The market page's optional {@code ?sort=popular} door: the identical
+     * filter contract, ordered by how many actors' impressions each row has
+     * collected (the engagement module's grouped popularity fact), freshness
+     * the tie-break. Zero-impression rows still appear — the LEFT-join shape
+     * of the correlated count — so popularity reorders, never filters.
+     * <p>
+     * The caller passes an <b>unsorted</b> Pageable: the order lives here, so
+     * Spring cannot append a second {@code ORDER BY} over it.
+     */
+    @EntityGraph(attributePaths = {"status", "type"})
+    @Query(value = """
+            SELECT p FROM Property p
+            WHERE (:statusCode IS NULL OR p.status.code = :statusCode)
+              AND (:typeId IS NULL OR p.type.id = :typeId)
+              AND (:stateId IS NULL OR p.stateId = :stateId)
+              AND (:search IS NULL
+                   OR tsvector_matches(p.vector, CAST(:search AS string)) = TRUE)
+            ORDER BY (SELECT COUNT(i.id) FROM Impression i
+                      WHERE i.referenceId = p.id AND i.entityId = :entityId) DESC,
+                     p.createdAt DESC, p.id ASC
+            """,
+            countQuery = """
+            SELECT COUNT(p) FROM Property p
+            WHERE (:statusCode IS NULL OR p.status.code = :statusCode)
+              AND (:typeId IS NULL OR p.type.id = :typeId)
+              AND (:stateId IS NULL OR p.stateId = :stateId)
+              AND (:search IS NULL
+                   OR tsvector_matches(p.vector, CAST(:search AS string)) = TRUE)
+            """)
+    Page<Property> searchPopular(@Param("statusCode") String statusCode,
+                                 @Param("entityId") UUID entityId,
+                                 @Param("typeId") UUID typeId,
+                                 @Param("stateId") UUID stateId,
+                                 @Param("search") String search,
+                                 Pageable pageable);
+
     /** The type delete gate: a property's kind keeps its type row alive. */
     boolean existsByTypeId(UUID typeId);
 }
