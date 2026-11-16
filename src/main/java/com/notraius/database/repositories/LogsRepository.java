@@ -289,28 +289,6 @@ public class LogsRepository {
         return Timestamp.from(i);
     }
 
-    /**
-     * Usage meter for the shared subscription module: executions of one
-     * activity by one user inside a validity window (to == null = open-ended).
-     * A single COUNT over the parent — pruning limits the scan to the
-     * partitions covering the window.
-     */
-    public Long countSubscriptionUsage(UUID userId, UUID activityId, String operation,
-                                       Instant from, Instant to) {
-        Instant upper = to != null ? to : Instant.now();
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM ")
-                .append(logsTable)
-                .append(" WHERE created_by = ? AND activity_id = ? AND UPPER(operation) = ?");
-        List<Object> params = new ArrayList<>(List.of(userId, activityId, operation));
-        if (from != null) {
-            sql.append(" AND created_at >= ?");
-            params.add(ts(from));
-        }
-        sql.append(" AND created_at < ?");
-        params.add(ts(upper));
-        Long n = jdbc.queryForObject(sql.toString(), Long.class, params.toArray());
-        return n != null ? n : 0L;
-    }
 
     // ─── Row Mapper ────────────────────────────────────────────────────────
 

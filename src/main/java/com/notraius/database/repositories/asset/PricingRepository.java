@@ -20,6 +20,28 @@ public interface PricingRepository extends JpaRepository<Pricing, UUID> {
     @EntityGraph(attributePaths = {"property", "type", "duration", "validity", "status"})
     List<Pricing> findByPropertyId(UUID propertyId);
 
+    @Query("SELECT COUNT(p) FROM Pricing p WHERE p.property.ownerId IN :owners " +
+            "AND p.createdAt >= :from AND p.createdAt < :to")
+    long countNewByPropertyOwners(@Param("owners") Collection<UUID> owners,
+                                  @Param("from") Instant from,
+                                  @Param("to") Instant to);
+
+    /**
+     * A pricing is active only while it answers now: LIVE and inside its
+     * half-open validity window. A stored LIVE status past its toDate reads
+     * EXPIRED and must not count.
+     */
+    @Query("""
+            SELECT COUNT(p) FROM Pricing p
+            WHERE p.property.ownerId IN :owners
+              AND p.status.code = :liveStatusCode
+              AND p.validity.fromDate <= :now
+              AND (p.validity.toDate IS NULL OR p.validity.toDate > :now)
+            """)
+    long countActiveByPropertyOwners(@Param("owners") Collection<UUID> owners,
+                                     @Param("liveStatusCode") String liveStatusCode,
+                                     @Param("now") Instant now);
+
     /** One pricing per (property, type) — the one-row law's read side. */
     boolean existsByPropertyIdAndTypeId(UUID propertyId, UUID typeId);
 

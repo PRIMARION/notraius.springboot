@@ -9,10 +9,20 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
 
 @Repository
 public interface RuleRepository extends JpaRepository<Rule, UUID> {
+
+    long countByCreatorIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            Collection<UUID> owners, Instant from, Instant to);
+
+    @Query("SELECT COUNT(r) FROM Rule r WHERE r.creatorId IN :owners " +
+            "AND r.status.code = :statusCode")
+    long countActiveByCreators(@Param("owners") Collection<UUID> owners,
+                               @Param("statusCode") String statusCode);
 
     /**
      * The catalogue page, with the visibility invariant pushed into SQL rather

@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,6 +45,10 @@ public interface PolicyRepository extends JpaRepository<Policy, UUID> {
      * and Nigeria with different bounds and even a different unit — that is the
      * whole point of the state scoping of 4.3.
      */
+    long countByCreatedAtGreaterThanEqualAndCreatedAtLessThan(Instant from, Instant to);
+
+    long countByStatus_Code(String statusCode);
+
     boolean existsByEntityIdAndCodeAndStateId(UUID entityId, String code, UUID stateId);
 
     /** The stateless slot of that identity — one global default per code. */

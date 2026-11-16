@@ -23,6 +23,14 @@ public interface VisitRepository extends JpaRepository<Visit, UUID> {
             "pricing.status", "validity", "validity.status", "status"})
     Optional<Visit> findById(UUID visitId);
 
+    long countByVisitorIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            Collection<UUID> owners, Instant from, Instant to);
+
+    @Query("SELECT COUNT(v) FROM Visit v WHERE v.visitorId IN :owners " +
+            "AND v.status.code IN :statusCodes")
+    long countActiveByVisitors(@Param("owners") Collection<UUID> owners,
+                               @Param("statusCodes") Collection<String> statusCodes);
+
     /**
      * The visitor's own page, narrowed by the statuses asked for and by the
      * window the visit is scheduled in.

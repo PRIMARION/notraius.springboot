@@ -17,3 +17,16 @@ definitions:
         - findAll
         - findById
         - findByCode
+
+  - tableName: plan_features
+    repositoryBeanName: subscriptionPlanFeatureRepository
+    entityClassName: org.primarion.module.subscription.database.entities.PlanFeature
+    description: Feature bindings per plan (limit + unit; admin-writable)
+    methods:
+      UNAUTHENTICATED:
+        - findAll
+        - findById
+        - findByPlanId
+      ADMIN:
+        - save
+        - deleteById

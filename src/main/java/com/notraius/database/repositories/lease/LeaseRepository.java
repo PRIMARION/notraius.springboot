@@ -23,6 +23,14 @@ public interface LeaseRepository extends JpaRepository<Lease, UUID> {
             "pricing.duration", "pricing.duration.type", "validity", "validity.status", "status"})
     Optional<Lease> findById(UUID leaseId);
 
+    long countByUserIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            Collection<UUID> owners, Instant from, Instant to);
+
+    @Query("SELECT COUNT(l) FROM Lease l WHERE l.userId IN :owners " +
+            "AND l.status.code IN :statusCodes")
+    long countActiveByTenants(@Param("owners") Collection<UUID> owners,
+                              @Param("statusCodes") Collection<String> statusCodes);
+
     /**
      * The tenant's own page, narrowable to a status set and to a term window.
      * <p>

@@ -8,9 +8,7 @@ import org.primarion.module.errors.NotFoundException;
 import org.primarion.database.entities.lifecycle.StatusPort;
 import org.primarion.module.utils.security.users.UserService;
 import org.primarion.module.communication.core.dto.ResolvedStatus;
-import org.primarion.module.access.consent.service.subscription.UsageCounter;
 import org.primarion.module.subscription.config.SubscriptionBindings;
-import com.notraius.database.repositories.LogsRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -76,12 +74,4 @@ public class SubscriptionModuleConfig {
         };
     }
 
-    @Bean
-    public UsageCounter usageCounter(LogsRepository logsRepository) {
-        // Window = the subscription's own validity columns; to == null means
-        // open-ended (FREE) — count up to now. All SQL lives in the
-        // repository — this config never touches SQL.
-        return (userId, activityId, operation, from, to) ->
-                logsRepository.countSubscriptionUsage(userId, activityId, operation, from, to);
-    }
 }

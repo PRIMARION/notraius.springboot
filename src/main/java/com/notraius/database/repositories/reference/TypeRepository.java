@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Repository
@@ -36,6 +37,10 @@ public interface TypeRepository extends JpaRepository<Type, UUID> {
                       @Param("statusCode") String statusCode,
                       @Param("search") String search,
                       Pageable pageable);
+
+    long countByCreatedAtGreaterThanEqualAndCreatedAtLessThan(Instant from, Instant to);
+
+    long countByStatus_Code(String statusCode);
 
     boolean existsByEntityIdAndCode(UUID entityId, String code);
 

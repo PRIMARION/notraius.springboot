@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +23,19 @@ public interface PropertyPolicyValueRepository extends JpaRepository<PropertyPol
 
     @EntityGraph(attributePaths = {"pricing", "policy", "status"})
     Optional<PropertyPolicyValue> findByPricingIdAndPolicyId(UUID pricingId, UUID policyId);
+
+    @Query("SELECT COUNT(v) FROM PropertyPolicyValue v " +
+            "WHERE v.pricing.property.ownerId IN :owners " +
+            "AND v.createdAt >= :from AND v.createdAt < :to")
+    long countNewByPropertyOwners(@Param("owners") Collection<UUID> owners,
+                                  @Param("from") Instant from,
+                                  @Param("to") Instant to);
+
+    @Query("SELECT COUNT(v) FROM PropertyPolicyValue v " +
+            "WHERE v.pricing.property.ownerId IN :owners " +
+            "AND v.status.code = :statusCode")
+    long countActiveByPropertyOwners(@Param("owners") Collection<UUID> owners,
+                                     @Param("statusCode") String statusCode);
 
     /** Every value of the given pricings — one read for a publication gate. */
     @EntityGraph(attributePaths = {"policy", "status"})

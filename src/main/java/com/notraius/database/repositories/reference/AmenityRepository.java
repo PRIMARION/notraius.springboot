@@ -11,6 +11,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -103,4 +105,12 @@ public interface AmenityRepository extends JpaRepository<Amenity, UUID> {
 
     /** The type's delete gate. */
     boolean existsByTypeId(UUID typeId);
+
+    long countByProposerInAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            Collection<UUID> owners, Instant from, Instant to);
+
+    @Query("SELECT COUNT(a) FROM Amenity a WHERE a.proposer IN :owners " +
+            "AND a.status.code = :statusCode")
+    long countActiveByProposers(@Param("owners") Collection<UUID> owners,
+                                @Param("statusCode") String statusCode);
 }

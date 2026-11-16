@@ -9,10 +9,20 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
 
 @Repository
 public interface PropertyRepository extends JpaRepository<Property, UUID> {
+
+    long countByOwnerIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
+            Collection<UUID> owners, Instant from, Instant to);
+
+    @Query("SELECT COUNT(p) FROM Property p WHERE p.ownerId IN :owners " +
+            "AND p.status.code IN :statusCodes")
+    long countActiveByOwners(@Param("owners") Collection<UUID> owners,
+                             @Param("statusCodes") Collection<String> statusCodes);
 
     /**
      * The property page. Every filter is optional and pushed into SQL, so a
