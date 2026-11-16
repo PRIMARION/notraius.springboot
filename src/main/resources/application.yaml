@@ -136,6 +136,19 @@ app:
     api-url: ${APP_FX_API_URL:https://api.exchangerate-api.com/v4/latest/USD}
     cache-ttl-seconds: ${APP_FX_CACHE_TTL_SECONDS:3600}
 
+  engagement:
+    # The learning loop's weights (V46). Reaction intensity is NOT configured
+    # here: the frontend fills a 0–100 score per reaction (50 = neutral), the
+    # only signal a kind can carry since no one can predict which kinds a
+    # deployment will declare. Decay cadence is the operator's 3-months-max rule.
+    dwell-threshold-ms: ${APP_ENGAGEMENT_DWELL_THRESHOLD_MS:30000}
+    dwell-nudge: ${APP_ENGAGEMENT_DWELL_NUDGE:0.25}
+    collection-nudge: ${APP_ENGAGEMENT_COLLECTION_NUDGE:1.0}
+    comment-nudge: ${APP_ENGAGEMENT_COMMENT_NUDGE:0.1}
+    affinity-decay-factor: ${APP_ENGAGEMENT_AFFINITY_DECAY_FACTOR:0.5}
+    affinity-decay-delay-ms: ${APP_ENGAGEMENT_AFFINITY_DECAY_DELAY_MS:7776000000}
+    affinity-decay-initial-delay-ms: ${APP_ENGAGEMENT_AFFINITY_DECAY_INITIAL_DELAY_MS:60000}
+
   storage:
     rootDir: ${STORAGE_ROOT_DIR}
     baseUrl: ${STORAGE_BASE_URL}

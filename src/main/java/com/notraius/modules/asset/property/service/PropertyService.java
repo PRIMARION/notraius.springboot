@@ -37,6 +37,8 @@ import com.notraius.modules.core.common.schedule.SweepLedger;
 import lombok.extern.slf4j.Slf4j;
 import com.notraius.common.dto.responses.RevisionSummaryResponse;
 import org.primarion.module.access.consent.service.OwnershipGuard;
+import org.primarion.module.engagement.core.EngagementReferences;
+import org.primarion.module.engagement.summary.EngagementSummaryService;
 import org.primarion.module.errors.BadRequestException;
 import org.primarion.module.errors.ConflictException;
 import org.primarion.module.errors.ForbiddenException;
@@ -53,6 +55,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -112,6 +115,8 @@ public class PropertyService extends OwnershipGuard {
     private final NotraiusProperties properties;
     private final QueryFilters queryFilters;
     private final RevisionService revisionService;
+    private final EngagementSummaryService engagement;
+    private final EngagementReferences engagementReferences;
 
     public PropertyService(PropertyRepository propertyRepository,
                            PricingRepository pricingRepository,
@@ -130,7 +135,9 @@ public class PropertyService extends OwnershipGuard {
                            AuditTrail auditTrail,
                            NotraiusProperties properties,
                            QueryFilters queryFilters,
-                           RevisionService revisionService) {
+                           RevisionService revisionService,
+                           EngagementSummaryService engagement,
+                           EngagementReferences engagementReferences) {
         this.propertyRepository = propertyRepository;
         this.pricingRepository = pricingRepository;
         this.amenityHoldingRepository = amenityHoldingRepository;
@@ -149,6 +156,8 @@ public class PropertyService extends OwnershipGuard {
         this.properties = properties;
         this.queryFilters = queryFilters;
         this.revisionService = revisionService;
+        this.engagement = engagement;
+        this.engagementReferences = engagementReferences;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -439,20 +448,59 @@ public class PropertyService extends OwnershipGuard {
     // Read
     // ═══════════════════════════════════════════════════════════════════════
 
-    /** The market page: PUBLISHED only, whatever the caller. */
+    /** The market page's two orders: {@code freshness} (the default) and {@code popular}. */
+    public static final String SORT_FRESHNESS = "freshness";
+    public static final String SORT_POPULAR = "popular";
+    private static final String PROPERTY_ENTITY = "PROPERTY";
+
+    /**
+     * The market page: PUBLISHED only, whatever the caller, with the loop's
+     * engagement facts riding on every row. {@code sort=popular} reorders by
+     * how many actors' impressions each row has collected — popularity
+     * reorders, never filters — and falls back to freshness when the
+     * the host registry has no PROPERTY entity.
+     */
     @Transactional(readOnly = true)
-    public Page<PropertyResponse> listPublished(UUID typeId, UUID stateId, String search, Pageable pageable) {
-        return propertyRepository.search(null, NotraiusStatuses.PROPERTY_PUBLISHED, typeId, stateId,
-                        queryFilters.search(search), pageable)
+    public Page<PropertyResponse> listPublished(UUID typeId, UUID stateId, String search,
+                                                String sort, Pageable pageable) {
+        String order = sort == null || sort.isBlank() ? SORT_FRESHNESS : sort.toLowerCase();
+        if (!SORT_FRESHNESS.equals(order) && !SORT_POPULAR.equals(order)) {
+            throw new BadRequestException(NotraiusErrors.PROPERTY_SORT_UNSUPPORTED,
+                    "Unknown sort '" + sort + "': use '" + SORT_FRESHNESS + "' or '" + SORT_POPULAR + "'");
+        }
+
+        if (SORT_POPULAR.equals(order)) {
+            UUID entityId = engagementReferences.findId(PROPERTY_ENTITY).orElse(null);
+            if (entityId != null) {
+                // The query owns its order (popularity, then freshness, then
+                // id), so the pageable stays unsorted — a second ORDER BY must
+                // never fight it.
+                Page<PropertyResponse> popular = propertyRepository.searchPopular(
+                                NotraiusStatuses.PROPERTY_PUBLISHED, entityId, typeId, stateId,
+                                queryFilters.search(search), PageRequest.of(pageable.getPageNumber(),
+                                        pageable.getPageSize()))
+                        .map(propertyMapper::toResponse);
+                enrich(popular.getContent());
+                return popular;
+            }
+        }
+
+        Page<PropertyResponse> page = propertyRepository.search(null, NotraiusStatuses.PROPERTY_PUBLISHED,
+                        typeId, stateId, queryFilters.search(search), pageable)
                 .map(propertyMapper::toResponse);
+        enrich(page.getContent());
+        return page;
     }
 
     /** The owner's page: every status of the caller's own rows, filtered by a real one. */
     @Transactional(readOnly = true)
     public Page<PropertyResponse> listMine(UUID callerId, String statusCode, String search, Pageable pageable) {
-        return propertyRepository.search(callerId, queryFilters.status(Entities.PROPERTY, statusCode),
+        Page<PropertyResponse> page = propertyRepository.search(callerId,
+                        queryFilters.status(Entities.PROPERTY, statusCode),
                         null, null, queryFilters.search(search), pageable)
                 .map(propertyMapper::toResponse);
+        enrich(page.getContent());
+        return page;
     }
 
     /** A published property is public; anything else does not exist for others. */
@@ -480,10 +528,34 @@ public class PropertyService extends OwnershipGuard {
         Property property = requireProperty(propertyId);
         requireUnpublishedInvisible(property, callerId);
         if (version == null || version.equals(property.getVersion())) {
-            return propertyMapper.toResponse(property);
+            PropertyResponse response = propertyMapper.toResponse(property);
+            enrich(List.of(response));
+            return response;
         }
         requireHistoryReader(property, callerId);
         return revisionService.revisionOf(Entities.PROPERTY, propertyId, version, PropertyResponse.class);
+    }
+
+    /**
+     * Stamps the engagement facts onto a page of responses in one batched
+     * read. Facts, not a ranking — every read path decides for itself whether
+     * to show them; a degraded read leaves the fields null rather than failing
+     * the page (the enrichment read is fail-soft by its own law).
+     */
+    private void enrich(List<PropertyResponse> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        Map<UUID, EngagementSummaryService.Summary> summary = engagement.summarize(
+                PROPERTY_ENTITY, rows.stream().map(PropertyResponse::getId).toList());
+        for (PropertyResponse row : rows) {
+            EngagementSummaryService.Summary facts = summary.get(row.getId());
+            if (facts != null) {
+                row.setViews(facts.views());
+                row.setReactions(facts.reactions());
+                row.setComments(facts.comments());
+            }
+        }
     }
 
     /**

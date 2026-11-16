@@ -101,6 +101,8 @@ class PropertyServiceTest {
     @Mock private RequiredAuditWriter auditLogWriter;
     @Mock private QueryFilters queryFilters;
     @Mock private RevisionService revisionService;
+    @Mock private org.primarion.module.engagement.summary.EngagementSummaryService engagementSummary;
+    @Mock private org.primarion.module.engagement.core.EngagementReferences engagementReferences;
 
     private PropertyService service;
 
@@ -111,7 +113,8 @@ class PropertyServiceTest {
                 logisticLocationClient,
                 stateCurrencyResolver,
                 userService, statusResolver, new PropertyMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter),
-                new com.notraius.config.properties.NotraiusProperties(), queryFilters, revisionService);
+                new com.notraius.config.properties.NotraiusProperties(), queryFilters, revisionService,
+                engagementSummary, engagementReferences);
         lenient().when(statusResolver.resolve(any(), any()))
                 .thenAnswer(invocation -> status(invocation.getArgument(1)));
         // The filters' own law is QueryFiltersTest's subject; here they must only

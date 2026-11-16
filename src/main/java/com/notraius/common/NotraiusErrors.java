@@ -105,6 +105,9 @@ public enum NotraiusErrors implements ErrorCode {
     PROPERTY_STATE_UNRESOLVABLE("NT-0063",
             "The property has no resolved state, so no state-dependent act is possible",
             ErrorCategory.BUSINESS),
+    PROPERTY_SORT_UNSUPPORTED("NT-0064",
+            "The market page does not offer this sort; use freshness or popular",
+            ErrorCategory.VALIDATION),
 
     // ── Amenity holdings (PLAN.md 3.3 / 4.1) ──────────────────────────────
     PROPERTY_AMENITY_NOT_FOUND("NT-0065", "The property does not hold this amenity",

@@ -29,7 +29,8 @@ public class PropertyMapper {
                 property.getCurrencyId(),
                 property.getVersion(),
                 property.getCreatedAt(),
-                property.getUpdatedAt()
+                property.getUpdatedAt(),
+                null, null, null
         );
     }
 

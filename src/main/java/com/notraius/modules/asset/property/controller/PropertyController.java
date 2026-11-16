@@ -49,7 +49,8 @@ import java.util.UUID;
  * <b>Reads are public (UPGRADE.md D1/D2).</b> The market list, the by-id read,
  * the amenity holdings and the tenancy window declare the
  * {@code UNAUTHENTICATED} rung — that declaration, read by {@code DoorRegistry},
- * is what skips the key floor and permits the door in the servlet chain; the
+ * is what requires the platform public key and admits the door in the servlet
+ * chain; the
  * annotation is the gate. Each read still pays an IP-scoped
  * {@link PublicReadThrottle} hit. Drafts, pauses and suspensions stay
  * invisible to everyone but the owner and staff, and every write stays
@@ -80,7 +81,12 @@ public class PropertyController {
     // ── Market and owner pages ────────────────────────────────────────────
 
     /**
-     * The market page: published properties, filterable by kind, state and text.
+     * The market page: published properties, filterable by kind, state and
+     * text, with each row's engagement facts (views, live reactions, standing
+     * comments) riding along. {@code ?sort=popular} reorders by those
+     * impressions — popularity reorders, never filters; the default
+     * {@code freshness} keeps the newest first.
+     * <p>
      * Public door — the handler declares {@code UNAUTHENTICATED} (see the class note).
      */
     @GetMapping
@@ -89,6 +95,7 @@ public class PropertyController {
             @RequestParam(required = false) UUID typeId,
             @RequestParam(required = false) UUID stateId,
             @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = PropertyService.SORT_FRESHNESS) String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         publicReadThrottle.charge(NotraiusActivities.Properties.LIST);
@@ -98,7 +105,7 @@ public class PropertyController {
         // differently per query).
         Pageable pageable = PaginatedResponse.of(page, size,
                 Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id")));
-        return ResponseEntity.ok(propertyService.listPublished(typeId, stateId, search, pageable));
+        return ResponseEntity.ok(propertyService.listPublished(typeId, stateId, search, sort, pageable));
     }
 
     /** The owner's page: every status of the caller's own properties. */
@@ -124,6 +131,13 @@ public class PropertyController {
      * version, is the live read. History is the owner's and moderation's: anyone
      * else gets the same 404 an absent listing gets, because a past revision can
      * hold what the present row no longer says.
+     * <p>
+     * <b>The client pairing.</b> This read is the front door of the attention
+     * loop: a client that renders this page should open a view
+     * ({@code POST /engagement/PROPERTY/{id}/views}) and close it when the
+     * visitor leaves ({@code PATCH /engagement/views/{stateId}/close}) — the
+     * close is what records the dwell, and a dwell at or above the threshold
+     * is what nudges the visitor's affinity.
      */
     @GetMapping("/{propertyId}")
     @PreAuthorize("@authz.authority('UNAUTHENTICATED', 'GTE', 'PUBLIC', 'PROPERTY_GET')")

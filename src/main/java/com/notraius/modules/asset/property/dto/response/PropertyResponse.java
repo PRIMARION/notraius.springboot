@@ -53,4 +53,18 @@ public class PropertyResponse {
     private Instant createdAt;
 
     private Instant updatedAt;
+
+    // ── Engagement facts (filled by the read paths; absent paths leave null) ──
+    // The learning loop's read side, batched: how many actors have viewed the
+    // row, how many hold a live reaction, how many comments stand. The counts
+    // are facts, not a ranking — the market page's order stays its own.
+
+    /** Distinct actor/row impressions recorded for this property. */
+    private Long views;
+
+    /** Live reactions (swaps and withdrawals have already stopped counting). */
+    private Long reactions;
+
+    /** Comments that stand (soft-removed ones have stopped counting). */
+    private Long comments;
 }
