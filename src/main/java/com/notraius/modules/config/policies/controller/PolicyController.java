@@ -39,11 +39,10 @@ import java.util.UUID;
  * The catalogue page is gated to the personal tier: a signed-in user browses the
  * standards to pick values against them in the asset module. The <b>by-id
  * reads are public doors</b> — a property's page links to the standard behind
- * each of its values, and a logged-out visitor must be able to follow that link,
- * so those handlers carry no {@code @PreAuthorize} at all (the servlet chain's
- * handler's {@code UNAUTHENTICATED} declaration is the gate) and pay an IP-scoped
- * {@link PublicReadThrottle} hit. Every write is admin-tier, exactly like types
- * and durations.
+ * each of its values, and a visitor must be able to follow that link,
+ * so those handlers declare {@code UNAUTHENTICATED} (the gate) and pay an
+ * IP-scoped {@link PublicReadThrottle} hit. Every write is admin-tier, exactly
+ * like types and durations.
  * <p>
  * <b>No DELETE endpoint.</b> Values already set against a policy are a
  * property's history; the exit is DISABLE (the admin's pause button), which is

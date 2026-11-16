@@ -38,9 +38,8 @@ import java.util.UUID;
  * <p>
  * Writes and the catalogue page are gated at the personal tier because rules
  * are user-owned: any authenticated user creates one. The two <b>by-id reads
- * are public doors</b> and carry no {@code @PreAuthorize} at all — a logged-out
- * visitor viewing a published property must see the rules it commits to, and a
- * public rule is readable by anyone; the servlet chain's
+ * are public doors</b> — a visitor viewing a published property must see the
+ * rules it commits to, and a public rule is readable by anyone; the
  * handler's {@code UNAUTHENTICATED} declaration is the gate, and each call pays an
  * IP-scoped {@link PublicReadThrottle} hit. Visibility is still scoped inside
  * the service, not by the endpoint's tier.

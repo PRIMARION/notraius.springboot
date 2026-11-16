@@ -42,10 +42,10 @@ import java.util.UUID;
  * anyone, a draft only to its owner. Writes are always the owner's — an admin
  * defines the standards and the rules, never the property's answers to them.
  * <p>
- * <b>The three reads are public doors</b> and therefore carry no
- * {@code @PreAuthorize}: a logged-out visitor has no principal for an authority
- * gate to resolve, so the handler's {@code UNAUTHENTICATED} declaration is
- * the gate and the property's own visibility decides the answer. Each call
+ * <b>The three reads are public doors</b>: a visitor carries the platform
+ * public key and no session, so the handler's {@code UNAUTHENTICATED}
+ * declaration is the gate and the property's own visibility decides the
+ * answer. Each call
  * pays an IP-scoped {@link PublicReadThrottle} hit.
  */
 @RestController

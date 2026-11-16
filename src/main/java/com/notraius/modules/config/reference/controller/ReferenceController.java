@@ -47,10 +47,9 @@ import java.util.UUID;
  * <b>The tier split, expressed the way every module in this plan expresses
  * it.</b> The catalogue <i>pages</i> are gated to the personal tier and above so
  * a user can fill their dropdowns and filters; the <i>by-id</i> reads (single
- * and batch) are public doors and therefore carry no {@code @PreAuthorize} at
- * all — a logged-out visitor's property page resolves its type, its duration
- * and its amenities by id, and there is no principal for an authority gate to
- * resolve. Each handler declares {@code UNAUTHENTICATED} — that is their gate;
+ * and batch) are public doors — a visitor's property page resolves its type,
+ * its duration and its amenities by id. Each handler declares
+ * {@code UNAUTHENTICATED} — that is their gate;
  * each call pays an IP-scoped {@link PublicReadThrottle} hit. Catalogue writes
  * are gated to the admin tier.
  * The two user-tier writes are the ones the plan hands to users by ruling:

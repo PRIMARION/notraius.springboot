@@ -25,8 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>every controller handler declares a rung (or inherits a class-level
  *       one) — {@code DoorRegistry} enforces the same invariant at boot, this
  *       keeps it visible in the build;</li>
- *   <li>UNAUTHENTICATED is only ever declared by the intentional public read
- *       controllers — a write surface or an owner page must not drift open;</li>
+ *   <li>ANONYMOUS (the fully-open rung) is only ever declared by the
+ *       intentional public read controllers — a write surface or an owner
+ *       page must not drift open;</li>
  *   <li>the two sibling pages that used to need {@code AUTHENTICATED_GET_*}
  *       (an owner page and a moderation queue) do not declare the open rung:
  *       specificity resolves them to 401 by their own gate.</li>
@@ -92,14 +93,14 @@ class PublicSurfaceTest {
     }
 
     @Test
-    void onlyPublicReadControllersDeclareUnauthenticated() throws IOException {
+    void onlyPublicReadControllersDeclareAnonymous() throws IOException {
         for (Path file : javaFiles()) {
             String source = Files.readString(file);
-            if (!source.contains("'UNAUTHENTICATED'")) {
+            if (!source.contains("'ANONYMOUS'")) {
                 continue;
             }
             assertTrue(PUBLIC_READ_CONTROLLERS.contains(strip(file.getFileName().toString())),
-                    file.getFileName() + " declares UNAUTHENTICATED but is not a public read controller");
+                    file.getFileName() + " declares ANONYMOUS but is not a public read controller");
         }
     }
 
@@ -115,7 +116,7 @@ class PublicSurfaceTest {
                 }
                 String block = source.substring(m.end(),
                         Math.min(source.length(), m.end() + 500));
-                assertFalse(block.contains("'UNAUTHENTICATED'"),
+                assertFalse(block.contains("'ANONYMOUS'"),
                         path + " sits inside a public wildcard but must keep its own gate "
                                 + "(specificity gives the named door priority, so it answers 401)");
             }

@@ -277,7 +277,7 @@ app:
     strictDoors: ${STRICT_DOORS:true}
     # #CTR-18: /error removed — Spring Boot error controller can leak stack traces.
     # Every request needs X-Service-Public-Key unless its handler declares
-    # UNAUTHENTICATED. Actuator and the OpenAPI/Swagger surface are the only
+    # ANONYMOUS. Actuator and the OpenAPI/Swagger surface are the only
     # infrastructure allowlist (InfraPublicPaths) — there is no env door list.
     # may browse, plus the targeted config lookups an anonymous renderer follows
     # (asset DTOs carry ids, not config payloads — N1). Empty by default, like

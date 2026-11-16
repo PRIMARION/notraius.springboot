@@ -133,10 +133,10 @@ public class SecurityConfig {
                     // Infrastructure surface is the only residual allowlist: actuator,
                     // API docs and Swagger assets have no MVC handler to declare themselves.
                     auth.requestMatchers(InfraPublicPaths.matcher()).permitAll();
-                    // Doors are declared ON the handler. UNAUTHENTICATED = no credential at
-                    // all; ANONYMOUS = validated public key, no session.
-                    auth.requestMatchers(doorRegistry.unauthenticatedMatcher()).permitAll();
-                    auth.requestMatchers(doorRegistry.anonymousMatcher())
+                    // Doors are declared ON the handler. ANONYMOUS = no credential at
+                    // all; UNAUTHENTICATED = validated public key, no session.
+                    auth.requestMatchers(doorRegistry.anonymousMatcher()).permitAll();
+                    auth.requestMatchers(doorRegistry.unauthenticatedMatcher())
                             .access((authentication, object) -> new AuthorizationDecision(
                                     object.getRequest().getAttribute(
                                             PublicKeyValidationFilter.VALIDATED_PUBLIC_KEY_ATTR) != null));
