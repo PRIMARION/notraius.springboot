@@ -125,12 +125,11 @@ app:
   name: ${APP_NAME:springboot.notraius}
   baseUrl: ${APP_BASE_URL}
   frontendUrl: ${FRONTEND_URL}
-  profile: ${APP_PROFILE}
+  profile: ${APP_PROFILE:dev}
 
   flowmap:
     enabled: ${FLOWMAP_ENABLED:false}
     workspace-roots: ${FLOWMAP_WORKSPACE_ROOTS:}
-    allow-anonymous: ${FLOWMAP_ALLOW_ANONYMOUS:false}
 
   fx:
     api-url: ${APP_FX_API_URL:https://api.exchangerate-api.com/v4/latest/USD}
