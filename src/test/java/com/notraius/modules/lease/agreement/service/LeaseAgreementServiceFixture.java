@@ -175,6 +175,6 @@ final class LeaseAgreementServiceFixture {
                 noticeRepository, conditionRepository, settlementRepository, valueRepository,
                 payPaymentClient, policyResolver, typeRepository, statusResolver, userService,
                 properties, stateService, leaseMapper, conditionMapper, new AuditTrail(objectMapper, auditLogWriter),
-                transactionManager, pager);
+                transactionManager, pager, new com.notraius.common.services.LeaseAnnouncer(null, null, objectMapper));
     }
 }

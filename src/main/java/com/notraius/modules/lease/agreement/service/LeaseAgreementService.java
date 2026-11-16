@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.NotraiusErrors;
 import com.notraius.common.integration.PayPaymentClient;
+import com.notraius.common.services.LeaseAnnouncer;
 import com.notraius.common.services.PolicyResolver;
 import com.notraius.common.services.StatusResolver;
 import com.notraius.config.properties.NotraiusProperties;
@@ -144,6 +145,7 @@ public class LeaseAgreementService extends OwnershipGuard {
     private final AuditTrail auditTrail;
     private final TransactionTemplate transactions;
     private final SweepPager sweeps;
+    private final LeaseAnnouncer announcer;
 
     private static final String SPLIT_REFERENCE_PREFIX = "LEASE-SPLIT:";
     private static final String IMPORT_SPLIT_REFERENCE_PREFIX = "LEASE-IMPORT-SPLIT:";
@@ -180,7 +182,8 @@ public class LeaseAgreementService extends OwnershipGuard {
                                  LeaseConditionMapper conditionMapper,
                                  AuditTrail auditTrail,
                                  PlatformTransactionManager transactionManager,
-                                 SweepPager sweeps) {
+                                 SweepPager sweeps,
+                                 LeaseAnnouncer announcer) {
         this.pricingRepository = pricingRepository;
         this.propertyRepository = propertyRepository;
         this.leaseRepository = leaseRepository;
@@ -204,6 +207,7 @@ public class LeaseAgreementService extends OwnershipGuard {
         this.auditTrail = auditTrail;
         this.transactions = new TransactionTemplate(transactionManager);
         this.sweeps = sweeps;
+        this.announcer = announcer;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -434,6 +438,9 @@ public class LeaseAgreementService extends OwnershipGuard {
 
         LeaseResponse response = read(lease);
         auditActivation(lease, reason + " (" + rows + " periods)", response);
+        announcer.announce(lease, "ACTIVATED", NotraiusActivities.Leases.ACTIVATE, actor,
+                "Lease is active",
+                "Lease " + lease.getId() + " is active; the calendar and its custody are running.");
         log.info("Lease {} ACTIVE by {} ({}) with {} calendar rows",
                 lease.getId(), actor, reason, rows);
         return response;
@@ -674,6 +681,10 @@ public class LeaseAgreementService extends OwnershipGuard {
 
         LeaseResponse after = leaseMapper.toResponse(lease, deposits, splits);
         audit(activity, lease.getId(), operation, after, before);
+        announcer.announce(lease, terminalStatus, activity, actor,
+                "Lease " + terminalStatus.toLowerCase(java.util.Locale.ROOT).replace('_', ' '),
+                "Lease " + lease.getId() + " is " + terminalStatus
+                        + "; the held custody was returned in full.");
         log.info("Lease {} {} ({}) by {}; {} held splits refunded",
                 lease.getId(), terminalStatus, reason, actor, splits.size());
         return after;
@@ -812,6 +823,10 @@ public class LeaseAgreementService extends OwnershipGuard {
         conditionRepository.save(condition);
 
         auditCondition(condition, NotraiusActivities.Leases.CONDITION_UPLOAD, "REPORT");
+        announcer.announce(lease, "CONDITION_REPORTED", NotraiusActivities.Leases.CONDITION_UPLOAD,
+                callerId, "Lease condition reported",
+                "A " + typeCode + " condition report was filed on lease " + leaseId
+                        + "; confirm or contest it.");
         log.info("Lease {} condition {} reported by {} as {}", leaseId, condition.getId(), callerId, typeCode);
         return conditionMapper.toResponse(condition);
     }
@@ -851,6 +866,9 @@ public class LeaseAgreementService extends OwnershipGuard {
         condition.setVersion(condition.getVersion() + 1);
         conditionRepository.save(condition);
         auditCondition(condition, NotraiusActivities.Leases.CONDITION_CONFIRM, "CONFIRM");
+        announcer.announce(lease, "CONDITION_CONFIRMED", NotraiusActivities.Leases.CONDITION_CONFIRM,
+                callerId, "Lease condition confirmed",
+                "The " + typeCode + " condition on lease " + lease.getId() + " was confirmed.");
         log.info("Lease {} condition {} confirmed by {}", lease.getId(), conditionId, callerId);
 
         if (moveIn) {
@@ -1006,6 +1024,9 @@ public class LeaseAgreementService extends OwnershipGuard {
         lease.setVersion(lease.getVersion() + 1);
         leaseRepository.save(lease);
         auditConfirmation(lease, NotraiusActivities.Leases.CONFIRM, "CONFIRM", read(lease));
+        announcer.announce(lease, "CONFIRMED", NotraiusActivities.Leases.CONFIRM, callerId,
+                "Lease confirmed",
+                "The owner confirmed lease " + lease.getId() + ".");
         log.info("Lease {} confirmed by owner {}", lease.getId(), callerId);
 
         if (bypassesConditions(lease)) {
@@ -1157,6 +1178,10 @@ public class LeaseAgreementService extends OwnershipGuard {
             LeaseResponse response = read(lease, deposits);
             response.setFundingResolved(true);
             audit(NotraiusActivities.Leases.CREATE, lease.getId(), "CREATE", response, null);
+            announcer.announce(lease, "REQUESTED", NotraiusActivities.Leases.CREATE, tenantId,
+                    "Lease requested",
+                    "A lease was requested for your property (lease " + lease.getId()
+                            + "); confirm it.");
             log.info("Lease {} born without a deposit matrix (pricing {} has no policy chain)",
                     lease.getId(), pricing.getId());
             return response;
@@ -1199,6 +1224,11 @@ public class LeaseAgreementService extends OwnershipGuard {
         LeaseResponse response = read(lease);
         audit(adopted ? NotraiusActivities.Leases.CREATE_ADOPT : NotraiusActivities.Leases.CREATE,
                 lease.getId(), adopted ? "ADOPT" : "CREATE", response, null);
+        announcer.announce(lease, adopted ? "FUNDING_ADOPTED" : "REQUESTED",
+                NotraiusActivities.Leases.CREATE, tenantId,
+                "Lease requested",
+                "A lease was requested for your property (lease " + lease.getId()
+                        + ") and its deposit matrix is funded; confirm it.");
         log.info("Lease {} {} for tenant={} property={} amount={} splits={} payment={}",
                 lease.getId(), adopted ? "adopted" : "funded", tenantId, property.getId(),
                 payment.amount(), wire.size(), payment.id());
@@ -1731,6 +1761,10 @@ public class LeaseAgreementService extends OwnershipGuard {
             LeaseResponse response = read(lease);
             response.setFundingResolved(true);
             auditImport(NotraiusActivities.Leases.IMPORT_CREATE, lease, "CREATE");
+            announcer.announce(lease, "IMPORT_DECLARED", NotraiusActivities.Leases.IMPORT_CREATE,
+                    callerId, "Imported lease declared",
+                    "An imported lease was declared for you (lease " + lease.getId()
+                            + "); verify or refuse its truth.");
             log.info("Imported lease {} created for tenant {} with {} debt row(s)",
                     lease.getId(), request.getTenantId(), request.getDebts().size());
             return response;
@@ -1738,6 +1772,10 @@ public class LeaseAgreementService extends OwnershipGuard {
 
         LeaseResponse response = fundHoldings(lease, property, pricing, holdings, callerId);
         auditImport(NotraiusActivities.Leases.IMPORT_CREATE, lease, "CREATE");
+        announcer.announce(lease, "IMPORT_DECLARED", NotraiusActivities.Leases.IMPORT_CREATE,
+                callerId, "Imported lease declared",
+                "An imported lease was declared for you (lease " + lease.getId()
+                        + "); verify or refuse its truth.");
         log.info("Imported lease {} created for tenant {} ({} debts, {} holdings)",
                 lease.getId(), request.getTenantId(), request.getDebts().size(), holdings.size());
         return response;
@@ -1782,6 +1820,9 @@ public class LeaseAgreementService extends OwnershipGuard {
         leaseRepository.save(lease);
 
         auditImport(NotraiusActivities.Leases.IMPORT_ACCEPT, lease, "ACCEPT");
+        announcer.announce(lease, "IMPORT_ACCEPTED", NotraiusActivities.Leases.IMPORT_ACCEPT,
+                callerId, "Imported lease accepted",
+                "The tenant accepted imported lease " + leaseId + "'s declared truth.");
         log.info("Imported lease {} accepted by tenant {} ({} backlog row(s), validity {} → {})",
                 leaseId, callerId, backlog.size(), lease.getValidity().getFromDate(),
                 lease.getValidity().getToDate());
@@ -1792,8 +1833,11 @@ public class LeaseAgreementService extends OwnershipGuard {
     @Transactional
     public LeaseResponse refuse(UUID leaseId, UUID callerId) {
         requireImport(leaseId, callerId);
-        auditImport(NotraiusActivities.Leases.IMPORT_REFUSE, leaseRepository.findById(leaseId).orElseThrow(),
-                "REFUSE");
+        Lease refused = leaseRepository.findById(leaseId).orElseThrow();
+        auditImport(NotraiusActivities.Leases.IMPORT_REFUSE, refused, "REFUSE");
+        announcer.announce(refused, "IMPORT_REFUSED", NotraiusActivities.Leases.IMPORT_REFUSE,
+                callerId, "Imported lease refused",
+                "The tenant refused imported lease " + leaseId + "; it is cancelled whole.");
         log.info("Imported lease {} refused by tenant {}; cancelled whole", leaseId, callerId);
         return cancel(leaseId, callerId,
                 "the tenant refused the imported lease's declared truth");

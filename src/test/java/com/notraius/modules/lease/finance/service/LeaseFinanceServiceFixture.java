@@ -104,6 +104,7 @@ final class LeaseFinanceServiceFixture {
         return new LeaseFinanceService(breakdownRepository, depositRepository, splitRepository,
                 leaseRepository, topUpRepository, payPaymentClient,
                 assessmentClient, activityRepository, statusResolver, stateService,
-                financeMapper, new AuditTrail(objectMapper, auditLogWriter));
+                financeMapper, new AuditTrail(objectMapper, auditLogWriter),
+                new com.notraius.common.services.LeaseAnnouncer(null, null, objectMapper));
     }
 }

@@ -1,6 +1,8 @@
 package com.notraius.modules.visit.visits.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.NotraiusErrors;
 import com.notraius.common.integration.PayPaymentClient;
@@ -49,10 +51,12 @@ import org.primarion.module.access.activity.database.entities.Activity;
 import org.primarion.module.access.activity.database.repositories.ActivityRepository;
 import org.primarion.module.access.consent.service.OwnershipGuard;
 import org.primarion.module.communication.support.service.ReferenceParties;
+import org.primarion.module.communication.notification.service.NotificationService;
 import org.primarion.module.errors.BadRequestException;
 import org.primarion.module.errors.ConflictException;
 import org.primarion.module.errors.ForbiddenException;
 import org.primarion.module.errors.NotFoundException;
+import org.primarion.module.infra.webhook.service.WebhookDispatchHelper;
 import org.primarion.module.utils.security.users.UserClient;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -90,6 +94,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
     private final ValidityRepository validityRepository;
     private final LogsRepository logsRepository;
     private final SweepPager sweeps;
+    private final WebhookDispatchHelper webhookDispatchHelper;
+    private final NotificationService notificationService;
+    private final ObjectMapper objectMapper;
 
     public VisitService(VisitRepository visitRepository,
                                  PayPaymentClient payPaymentClient,
@@ -105,7 +112,10 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
                                  VisitPricingRepository visitPricingRepository,
                                  ValidityRepository validityRepository,
                                  LogsRepository logsRepository,
-                                 SweepPager sweeps) {
+                                 SweepPager sweeps,
+                                 WebhookDispatchHelper webhookDispatchHelper,
+                                 NotificationService notificationService,
+                                 ObjectMapper objectMapper) {
         this.visitRepository = visitRepository;
         this.payPaymentClient = payPaymentClient;
         this.statusResolver = statusResolver;
@@ -121,6 +131,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
         this.validityRepository = validityRepository;
         this.logsRepository = logsRepository;
         this.sweeps = sweeps;
+        this.webhookDispatchHelper = webhookDispatchHelper;
+        this.notificationService = notificationService;
+        this.objectMapper = objectMapper;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -162,6 +175,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.ASSIGN, visitId, restamp ? "REASSIGN" : "ASSIGN", after, before);
+        announceToParties(visit, restamp ? "REASSIGNED" : "ASSIGNED", callerId);
+        safeNotify(assigneeId, "Visit assigned to you",
+                "You were assigned to visit " + visitId + "; accept to begin planning.");
         log.info("Visit {} {} to user={} by owner={}", visitId, restamp ? "reassigned" : "assigned",
                 assigneeId, callerId);
         return after;
@@ -181,6 +197,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.ACCEPT, visitId, "ACCEPT", after, before);
+        announceToParties(visit, "ACCEPTED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit accepted",
+                "Visit " + visitId + " was accepted; planning has begun.");
         log.info("Visit {} accepted by assignee={}; planning begins", visitId, callerId);
         return after;
     }
@@ -200,6 +219,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.REJECT, visitId, "REJECT", after, before);
+        announceToParties(visit, "REJECTED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit assignment rejected",
+                "Visit " + visitId + " is unassigned again and needs another human.");
         log.info("Visit {} rejected by assignee={}; the request is live again", visitId, callerId);
         return after;
     }
@@ -234,6 +256,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.DECLINE, visitId, "DECLINE", after, before);
+        announceToParties(visit, "DECLINED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit declined",
+                "The owner declined visit " + visitId + "; the held money was returned in full.");
         log.info("Visit {} declined by owner={}; the visitor is refunded in full", visitId, callerId);
         return after;
     }
@@ -303,6 +328,93 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
     private void audit(String activityCode, UUID referenceId, String operation, Object after, Object before) {
         auditTrail.record(Entities.VISITS, activityCode, referenceId, operation, before, after);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Announcing (webhooks + in-app notices)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * The parties a visit move can matter to: visitor, property owner, and the
+     * assignee once stamped. The actor is excluded by the callers — the person
+     * who did the act already knows it happened.
+     */
+    private List<UUID> visitPartiesExcept(Visit visit, UUID actorId) {
+        LinkedHashSet<UUID> parties = new LinkedHashSet<>();
+        if (visit.getVisitorId() != null && !visit.getVisitorId().equals(actorId)) {
+            parties.add(visit.getVisitorId());
+        }
+        if (visit.getOwnerId() != null && !visit.getOwnerId().equals(actorId)) {
+            parties.add(visit.getOwnerId());
+        }
+        if (visit.getUserId() != null && !visit.getUserId().equals(actorId)) {
+            parties.add(visit.getUserId());
+        }
+        return List.copyOf(parties);
+    }
+
+    /** The verifiable facts every visit webhook carries — ids, money, window, state. */
+    private ObjectNode visitPayload(Visit visit, String event) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("event", event);
+        payload.put("visitId", visit.getId().toString());
+        payload.put("status", statusCodeOf(visit));
+        if (visit.getVisitorId() != null) {
+            payload.put("visitorId", visit.getVisitorId().toString());
+        }
+        if (visit.getOwnerId() != null) {
+            payload.put("ownerId", visit.getOwnerId().toString());
+        }
+        if (visit.getUserId() != null) {
+            payload.put("assignedUserId", visit.getUserId().toString());
+        }
+        payload.put("amount", visit.getAmount() != null ? visit.getAmount().toPlainString() : null);
+        if (visit.getValidity() != null && visit.getValidity().getFromDate() != null) {
+            payload.put("fromDate", visit.getValidity().getFromDate().toString());
+        }
+        if (visit.getValidity() != null && visit.getValidity().getToDate() != null) {
+            payload.put("toDate", visit.getValidity().getToDate().toString());
+        }
+        return payload;
+    }
+
+    /** Webhooks to every party except the actor, under the visit family. */
+    private void announceToParties(Visit visit, String event, UUID actorId) {
+        if (webhookDispatchHelper == null) {
+            return;
+        }
+        webhookDispatchHelper.dispatchToUsers(visitPartiesExcept(visit, actorId),
+                NotraiusActivities.VISITS, event, visitPayload(visit, event));
+    }
+
+    /**
+     * In-app notice, best-effort by contract: a broken identity or a refusing
+     * preference store must never roll back the business act it accompanies
+     * (the same rule the event module's notification binding states). The
+     * reference entity tags the notice {@code VISITS} without a reference id —
+     * several distinct notices fire per visit over its life, and one id would
+     * let the notification dedupe swallow all but the first.
+     */
+    private void safeNotify(UUID userId, String title, String message) {
+        if (userId == null || notificationService == null) {
+            return;
+        }
+        try {
+            notificationService.createNotification(userId, title, message,
+                    Entities.VISITS, null);
+        } catch (RuntimeException e) {
+            log.warn("Visit notice deferred for user {}: {}", userId, e.getMessage());
+        }
+    }
+
+    /**
+     * The in-app half of an announcement: every party but the actor hears the
+     * same sentence. Uses the same best-effort contract as {@link #safeNotify}.
+     */
+    private void notifyPartiesExcept(Visit visit, UUID actorId, String title, String message) {
+        for (UUID party : visitPartiesExcept(visit, actorId)) {
+            safeNotify(party, title, message);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1067,6 +1179,10 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.TIME_PROPOSE, visitId, "PROPOSE", after, before);
+        announceToParties(visit, "TIME_PROPOSED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit time proposed",
+                "Visit " + visitId + " was moved to [" + from + ", " + to
+                        + "); confirm or counter it.");
         log.info("Visit {} time proposed for [{} , {}) by user={}", visitId, from, to, callerId);
         return after;
     }
@@ -1096,6 +1212,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         audit(NotraiusActivities.Visits.TIME_CONFIRM, visitId, "CONFIRM", after, before);
+        announceToParties(visit, "TIME_CONFIRMED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit confirmed",
+                "Visit " + visitId + " is confirmed for its agreed time.");
         log.info("Visit {} confirmed by user={}; the time is agreed", visitId, callerId);
         return after;
     }
@@ -1247,6 +1366,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
             VisitResponse response = visitMapper.toResponse(visit);
             audit(reused ? NotraiusActivities.Visits.REQUEST_ADOPT : NotraiusActivities.Visits.REQUEST,
                     visit.getId(), reused ? "ADOPT" : "REQUEST", response, null);
+            announceToParties(visit, reused ? "REQUEST_ADOPTED" : "REQUESTED", visitorId);
+            safeNotify(visit.getOwnerId(), "New visit request",
+                    "A paid visit was requested for your property (visit " + visit.getId() + ").");
             log.info("Visit {} {} for visitor={} property={} amount={} payment={}",
                     visit.getId(), reused ? "adopted" : "requested", visitorId, property.getId(),
                     visit.getAmount(), payment.id());
@@ -1518,6 +1640,10 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
         VisitResponse after = visitMapper.toResponse(visit);
         visitLedgerService.audit(NotraiusActivities.Visits.RESCHEDULE, visitId, "RESCHEDULE",
                 after, before);
+        announceToParties(visit, "RESCHEDULED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit rescheduled",
+                "Visit " + visitId + " was rescheduled to [" + from + ", " + to
+                        + "); confirm the new time.");
         log.info("Visit {} rescheduled to [{}, {}) by user={}; no money moved, no judgment filed",
                 visitId, from, to, callerId);
         return after;
@@ -1607,6 +1733,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         visitLedgerService.audit(NotraiusActivities.Visits.START, visitId, "START", after, before);
+        announceToParties(visit, "STARTED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit started",
+                "Visit " + visitId + " was claimed started; countersign within the window.");
         log.info("Visit {} marked STARTED by user={} at {}", visitId, callerId, now);
         return after;
     }
@@ -1650,6 +1779,9 @@ public class VisitService extends OwnershipGuard implements ReferenceParties {
 
         VisitResponse after = visitMapper.toResponse(visit);
         visitLedgerService.audit(NotraiusActivities.Visits.START_CONFIRM, visitId, "CONFIRM", after, before);
+        announceToParties(visit, "START_CONFIRMED", callerId);
+        notifyPartiesExcept(visit, callerId, "Visit start countersigned",
+                "Visit " + visitId + "'s start is confirmed; the visit is under way.");
         log.info("Visit {} start countersigned by user={}", visitId, callerId);
         return after;
     }

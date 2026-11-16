@@ -68,7 +68,8 @@ class VisitCompletionServiceTest {
     @BeforeEach
     void setUp() {
         VisitLedgerService ledger = new VisitLedgerService(visitRepository, payPaymentClient,
-                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter));
+                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter),
+                null, null, new ObjectMapper().findAndRegisterModules());
         service = new VisitServiceFixture()
                 .visitRepository(visitRepository)
                 .visitLedgerService(ledger)

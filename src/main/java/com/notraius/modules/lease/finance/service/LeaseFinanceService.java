@@ -5,6 +5,7 @@ import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.NotraiusErrors;
 import com.notraius.common.integration.PayPaymentClient;
 import com.notraius.common.integration.ReputationAssessmentClient;
+import com.notraius.common.services.LeaseAnnouncer;
 import com.notraius.common.services.StatusResolver;
 import com.notraius.database.entities.config.PolicyUnit;
 import com.notraius.database.entities.lease.Lease;
@@ -90,6 +91,7 @@ public class LeaseFinanceService extends OwnershipGuard {
     private final LeaseStateService stateService;
     private final LeaseFinanceMapper financeMapper;
     private final AuditTrail auditTrail;
+    private final LeaseAnnouncer announcer;
 
     private static final String BILL_REFERENCE_PREFIX = "LEASE-BILL:";
     private static final String SPLIT_REFERENCE_PREFIX = "LEASE-TOPUP-SPLIT:";
@@ -106,7 +108,8 @@ public class LeaseFinanceService extends OwnershipGuard {
             StatusResolver statusResolver,
             LeaseStateService stateService,
             LeaseFinanceMapper financeMapper,
-            AuditTrail auditTrail) {
+            AuditTrail auditTrail,
+            LeaseAnnouncer announcer) {
         this.breakdownRepository = breakdownRepository;
         this.depositRepository = depositRepository;
         this.splitRepository = splitRepository;
@@ -119,6 +122,7 @@ public class LeaseFinanceService extends OwnershipGuard {
         this.stateService = stateService;
         this.financeMapper = financeMapper;
         this.auditTrail = auditTrail;
+        this.announcer = announcer;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -341,6 +345,11 @@ public class LeaseFinanceService extends OwnershipGuard {
                     "An imported lease skipped installment " + bill.getPeriodIndex());
         }
 
+        announcer.announce(lease, "INSTALLMENT_OVERDUE", NotraiusActivities.Leases.OVERDUE, null,
+                "Installment overdue",
+                "Installment " + bill.getPeriodIndex() + " of lease " + lease.getId()
+                        + " passed its deadline unpaid"
+                        + (consumed ? "; the advance custody covered it." : "."));
         log.info("Lease {} bill {} lapsed: overdue, assessed={}, consumed={}",
                 lease.getId(), bill.getId(), assessed, consumed);
         return true;
@@ -428,6 +437,10 @@ public class LeaseFinanceService extends OwnershipGuard {
 
         settle(bill, Instant.now(), null, null);
         auditPayment(NotraiusActivities.Leases.INSTALLMENT_PAY, bill, "PAY", financeMapper.toResponse(bill));
+        announcer.announce(lease, "INSTALLMENT_PAID", NotraiusActivities.Leases.INSTALLMENT_PAY,
+                callerId, "Installment paid",
+                "Installment " + bill.getPeriodIndex() + " of lease " + lease.getId()
+                        + " was paid in full (" + bill.getAmount() + ").");
         log.info("Lease {} bill {} paid by {} (payment {})",
                 lease.getId(), bill.getId(), callerId, payment.id());
         return financeMapper.toResponse(bill);
@@ -475,6 +488,12 @@ public class LeaseFinanceService extends OwnershipGuard {
 
         auditPayment(NotraiusActivities.Leases.CASH_CONFIRM, bill,
                 settled ? "CASH_SETTLED" : "CASH_SHORT", response);
+        announcer.announce(lease, settled ? "CASH_CONFIRMED" : "CASH_SHORT",
+                NotraiusActivities.Leases.CASH_CONFIRM, callerId,
+                settled ? "Cash payment confirmed" : "Cash payment short",
+                "Installment " + bill.getPeriodIndex() + " of lease " + lease.getId()
+                        + " received " + claimed + " of " + due
+                        + (settled ? "; the bill is settled." : "; the shortfall stands owed."));
         log.info("Lease {} bill {} cash-confirmed by {}: claimed {} of {} ({})",
                 lease.getId(), bill.getId(), callerId, claimed, due, settled ? "settled" : "short");
         return response;
@@ -694,6 +713,10 @@ public class LeaseFinanceService extends OwnershipGuard {
                 "units", String.valueOf(units),
                 "amount", amount.toString(),
                 "advanceBalance", advance.getBalance().toString()));
+        announcer.announce(lease, "TOPUP_FUNDED", NotraiusActivities.Leases.TOP_UP, callerId,
+                "Advance cushion restored",
+                "The tenant restored " + units + " unit(s) of the advance on lease "
+                        + leaseId + "; the cushion is " + advance.getBalance() + ".");
         log.info("Lease {} top-up {} funded: {} unit(s) for {} (payment {})",
                 leaseId, topUp.getId(), units, amount, payment.id());
 

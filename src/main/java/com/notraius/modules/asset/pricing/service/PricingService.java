@@ -27,9 +27,12 @@ import com.notraius.modules.asset.pricing.mapper.PricingMapper;
 import com.notraius.modules.core.common.constants.NotraiusActivities;
 import com.notraius.modules.core.common.constants.NotraiusStatuses;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.notraius.common.dto.responses.RevisionSummaryResponse;
 import com.notraius.modules.core.common.Windows;
 import org.primarion.module.access.consent.service.OwnershipGuard;
+import org.primarion.module.infra.webhook.service.WebhookDispatchHelper;
 import org.primarion.module.errors.BadRequestException;
 import org.primarion.module.errors.ConflictException;
 import org.primarion.module.errors.ForbiddenException;
@@ -83,6 +86,8 @@ public class PricingService extends OwnershipGuard {
     private final PricingMapper pricingMapper;
     private final AuditTrail auditTrail;
     private final RevisionService revisionService;
+    private final WebhookDispatchHelper webhookDispatchHelper;
+    private final ObjectMapper objectMapper;
 
     public PricingService(PropertyRepository propertyRepository,
                           PricingRepository pricingRepository,
@@ -94,7 +99,9 @@ public class PricingService extends OwnershipGuard {
                           StatusResolver statusResolver,
                           PricingMapper pricingMapper,
                           AuditTrail auditTrail,
-                          RevisionService revisionService) {
+                          RevisionService revisionService,
+                          WebhookDispatchHelper webhookDispatchHelper,
+                          ObjectMapper objectMapper) {
         this.propertyRepository = propertyRepository;
         this.pricingRepository = pricingRepository;
         this.valueRepository = valueRepository;
@@ -106,6 +113,8 @@ public class PricingService extends OwnershipGuard {
         this.pricingMapper = pricingMapper;
         this.auditTrail = auditTrail;
         this.revisionService = revisionService;
+        this.webhookDispatchHelper = webhookDispatchHelper;
+        this.objectMapper = objectMapper;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -163,6 +172,7 @@ public class PricingService extends OwnershipGuard {
 
         PricingResponse response = pricingMapper.toResponse(pricing, effectiveStatus(pricing, now));
         audit(NotraiusActivities.Pricings.CREATE, pricing.getId(), "CREATE", response, null);
+        announce(pricing, "CREATED", NotraiusActivities.Pricings.CREATE);
         return response;
     }
 
@@ -220,6 +230,7 @@ public class PricingService extends OwnershipGuard {
 
         PricingResponse after = pricingMapper.toResponse(pricing, effectiveStatus(pricing, Instant.now()));
         audit(NotraiusActivities.Pricings.UPDATE, pricingId, "UPDATE", after, before);
+        announce(pricing, "UPDATED", NotraiusActivities.Pricings.UPDATE);
         return after;
     }
 
@@ -255,6 +266,7 @@ public class PricingService extends OwnershipGuard {
 
         PricingResponse after = pricingMapper.toResponse(pricing, effectiveStatus(pricing, now));
         audit(NotraiusActivities.Pricings.WINDOW, pricingId, "WINDOW", after, before);
+        announce(pricing, "WINDOW_ISSUED", NotraiusActivities.Pricings.WINDOW);
         return after;
     }
 
@@ -271,6 +283,7 @@ public class PricingService extends OwnershipGuard {
 
         PricingResponse after = pricingMapper.toResponse(pricing, effectiveStatus(pricing, Instant.now()));
         audit(NotraiusActivities.Pricings.PAUSE, pricingId, "PAUSE", after, before);
+        announce(pricing, "PAUSED", NotraiusActivities.Pricings.PAUSE);
         return after;
     }
 
@@ -291,6 +304,7 @@ public class PricingService extends OwnershipGuard {
 
         PricingResponse after = pricingMapper.toResponse(pricing, effectiveStatus(pricing, Instant.now()));
         audit(NotraiusActivities.Pricings.RESUME, pricingId, "RESUME", after, before);
+        announce(pricing, "RESUMED", NotraiusActivities.Pricings.RESUME);
         return after;
     }
 
@@ -316,6 +330,39 @@ public class PricingService extends OwnershipGuard {
             validityRepository.delete(validity);
         }
         audit(NotraiusActivities.Pricings.DELETE, pricingId, "DELETE", null, before);
+        dispatchPricing(pricing, "DELETED", NotraiusActivities.Pricings.DELETE);
+    }
+
+    /**
+     * The pricing's public fact, sent to the acting owner's own webhooks: a
+     * price that answers, pauses or expires is exactly what a client integrates
+     * against. Fail-soft — the helper swallows a dead subscriber.
+     */
+    private void announce(Pricing pricing, String event, String activityCode) {
+        dispatchPricing(pricing, event, activityCode);
+    }
+
+    private void dispatchPricing(Pricing pricing, String event, String activityCode) {
+        if (webhookDispatchHelper == null) {
+            return;
+        }
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("event", event);
+        payload.put("pricingId", pricing.getId() != null ? pricing.getId().toString() : null);
+        payload.put("status", pricing.getStatus() != null ? pricing.getStatus().getCode() : null);
+        if (pricing.getProperty() != null) {
+            payload.put("propertyId", pricing.getProperty().getId().toString());
+        }
+        if (pricing.getType() != null) {
+            payload.put("type", pricing.getType().getCode());
+        }
+        payload.put("amount", pricing.getAmount() != null ? pricing.getAmount().toPlainString() : null);
+        // The dispatcher resolves the activity by FAMILY code (the registry
+        // row "PRICING", not the pair "PRICING.CREATE") — the same rule the
+        // lease announcer and every peer host follow.
+        int dot = activityCode.indexOf('.');
+        String family = dot > 0 ? activityCode.substring(0, dot) : activityCode;
+        webhookDispatchHelper.dispatchToCaller(family, event, payload);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

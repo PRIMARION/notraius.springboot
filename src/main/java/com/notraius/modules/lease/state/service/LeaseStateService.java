@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.NotraiusErrors;
 import com.notraius.common.integration.PayPaymentClient;
+import com.notraius.common.services.LeaseAnnouncer;
 import com.notraius.common.services.StatusResolver;
 import com.notraius.config.properties.NotraiusProperties;
 import com.notraius.database.entities.asset.Property;
@@ -105,6 +106,7 @@ public class LeaseStateService extends OwnershipGuard {
     private final LeaseStateMapper stateMapper;
     private final AuditTrail auditTrail;
     private final SweepPager sweeps;
+    private final LeaseAnnouncer announcer;
 
     private static final String LANDLORD_REFERENCE_PREFIX = "LEASE-SETTLEMENT-LANDLORD:";
     private static final String TENANT_REFERENCE_PREFIX = "LEASE-SETTLEMENT-TENANT:";
@@ -134,7 +136,8 @@ public class LeaseStateService extends OwnershipGuard {
             LeaseNoticeMapper noticeMapper,
             LeaseStateMapper stateMapper,
             AuditTrail auditTrail,
-            SweepPager sweeps) {
+            SweepPager sweeps,
+            LeaseAnnouncer announcer) {
         this.leaseRepository = leaseRepository;
         this.noticeRepository = noticeRepository;
         this.depositRepository = depositRepository;
@@ -154,6 +157,7 @@ public class LeaseStateService extends OwnershipGuard {
         this.stateMapper = stateMapper;
         this.auditTrail = auditTrail;
         this.sweeps = sweeps;
+        this.announcer = announcer;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -324,6 +328,11 @@ public class LeaseStateService extends OwnershipGuard {
 
         auditNotice(NotraiusActivities.Leases.NOTICE_SATISFY, notice, "DISSOLVE",
                 noticeMapper.toResponse(notice));
+        announcer.announce(lease, "RECONVERSION_DISSOLVED",
+                NotraiusActivities.Leases.NOTICE_SATISFY, null,
+                "Reconversion cleared",
+                "The imported backlog on lease " + lease.getId()
+                        + " is cleared; the tenancy continues open-ended.");
         log.info("Lease {} reconversion {} dissolved; tenancy continues open-ended",
                 lease.getId(), notice.getId());
         return true;
@@ -350,6 +359,11 @@ public class LeaseStateService extends OwnershipGuard {
         noticeRepository.save(notice);
 
         auditNotice(NotraiusActivities.Leases.NOTICE_ACCEPT, notice, "ACCEPT", noticeMapper.toResponse(notice));
+        announcer.announce(notice.getLease(), "NOTICE_ACCEPTED",
+                NotraiusActivities.Leases.NOTICE_ACCEPT, callerId,
+                "Lease notice accepted",
+                "The tenant accepted notice " + notice.getId() + "; the grace window closes "
+                        + notice.getValidity().getToDate() + ".");
         return noticeMapper.toResponse(notice);
     }
 
@@ -373,6 +387,10 @@ public class LeaseStateService extends OwnershipGuard {
         LeaseNotice vacation = issueVacation(notice.getLease(),
                 "The tenant refused the deposit notice " + notice.getId());
         auditNotice(NotraiusActivities.Leases.NOTICE_REFUSE, notice, "REFUSE", noticeMapper.toResponse(notice));
+        announcer.announce(notice.getLease(), "NOTICE_REFUSED",
+                NotraiusActivities.Leases.NOTICE_REFUSE, callerId,
+                "Lease notice refused",
+                "The tenant refused notice " + notice.getId() + "; the vacation clock follows.");
         log.info("Lease {} notice {} refused; vacation {} follows",
                 notice.getLease().getId(), notice.getId(),
                 vacation != null ? vacation.getId() : "not issued (no time remained)");
@@ -420,6 +438,11 @@ public class LeaseStateService extends OwnershipGuard {
         evaluateDeposit(lease);
 
         auditNotice(NotraiusActivities.Leases.NOTICE_CANCEL, notice, "CANCEL", noticeMapper.toResponse(notice));
+        announcer.announce(lease, "NOTICE_CANCELLED",
+                NotraiusActivities.Leases.NOTICE_CANCEL, callerId,
+                "Lease vacation cancelled",
+                "The vacation notice on lease " + lease.getId()
+                        + " was cancelled; the tenancy stands at its restored end.");
         log.info("Lease {} vacation {} cancelled; validity end restored to {}",
                 lease.getId(), notice.getId(), notice.getPreviousValidityToDate());
         return noticeMapper.toResponse(notice);
@@ -494,6 +517,10 @@ public class LeaseStateService extends OwnershipGuard {
         notice.setVersion(1);
         noticeRepository.save(notice);
         auditNotice(NotraiusActivities.Leases.NOTICE_ISSUE, notice, "ISSUE", noticeMapper.toResponse(notice));
+        announcer.announce(lease, typeCode, NotraiusActivities.Leases.NOTICE_ISSUE, null,
+                "Lease notice issued",
+                "A " + typeCode + " notice was issued on lease " + lease.getId()
+                        + "; answer before " + until + ".");
         return notice;
     }
 
@@ -504,6 +531,11 @@ public class LeaseStateService extends OwnershipGuard {
         notice.setRespondedAt(now);
         noticeRepository.save(notice);
         auditNotice(NotraiusActivities.Leases.NOTICE_ESCALATE, notice, "ESCALATE", noticeMapper.toResponse(notice));
+        announcer.announce(notice.getLease(), "NOTICE_ESCALATED",
+                NotraiusActivities.Leases.NOTICE_ESCALATE, null,
+                "Lease notice escalated",
+                "Notice " + notice.getId() + " on lease " + notice.getLease().getId()
+                        + " lapsed unanswered: " + reason + ".");
 
         LeaseNotice vacation = issueVacation(notice.getLease(), reason);
         log.info("Lease {} notice {} escalated ({}); vacation={}",
@@ -519,6 +551,11 @@ public class LeaseStateService extends OwnershipGuard {
         notice.getValidity().setToDate(now);
         noticeRepository.save(notice);
         auditNotice(NotraiusActivities.Leases.NOTICE_SATISFY, notice, "SATISFY", noticeMapper.toResponse(notice));
+        announcer.announce(notice.getLease(), "NOTICE_SATISFIED",
+                NotraiusActivities.Leases.NOTICE_SATISFY, null,
+                "Lease notice satisfied",
+                "Notice " + notice.getId() + " on lease " + notice.getLease().getId()
+                        + " closed itself: the cushion reached its standard.");
     }
 
     /**
@@ -661,6 +698,10 @@ public class LeaseStateService extends OwnershipGuard {
         auditSettlement(NotraiusActivities.Leases.SETTLE, row, "SETTLE", Map.of(
                 "leaseId", lease.getId().toString(),
                 "reason", reason != null ? reason : "validity ended"));
+        announcer.announce(lease, "SETTLEMENT_BORN", NotraiusActivities.Leases.SETTLE, actor,
+                "Lease settlement opened",
+                "The tenancy on lease " + lease.getId() + " ended; its settlement is open until "
+                        + row.getDeadline() + ".");
         log.info("Settlement {} born for lease {} ({}); property {} DISABLED",
                 row.getId(), lease.getId(), reason,
                 lease.getPricing().getProperty() != null
@@ -718,6 +759,11 @@ public class LeaseStateService extends OwnershipGuard {
         auditSettlement(NotraiusActivities.Leases.SETTLEMENT_CONFIRM, row, "CONFIRM", Map.of(
                 "leaseId", lease.getId().toString(),
                 "confirmedBy", String.valueOf(callerId)));
+        announcer.announce(lease, "SETTLEMENT_CONFIRMED",
+                NotraiusActivities.Leases.SETTLEMENT_CONFIRM, callerId,
+                "Lease completed",
+                "Settlement " + settlementId + " is confirmed; lease " + lease.getId()
+                        + " is completed and the property leaves the market.");
         log.info("Settlement {} confirmed by {}; lease {} COMPLETED",
                 settlementId, callerId, lease.getId());
         return read(row, lease);

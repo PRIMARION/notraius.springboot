@@ -67,7 +67,8 @@ class VisitStartServiceTest {
         properties = new NotraiusProperties();
         properties.setVisitStartConfirmWindowMinutes(10);
         VisitLedgerService ledger = new VisitLedgerService(visitRepository, payPaymentClient,
-                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter));
+                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter),
+                null, null, new ObjectMapper().findAndRegisterModules());
         service = new VisitServiceFixture()
                 .visitRepository(visitRepository)
                 .statusResolver(statusResolver)

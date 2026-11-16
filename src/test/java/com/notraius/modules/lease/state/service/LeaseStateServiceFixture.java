@@ -151,6 +151,7 @@ final class LeaseStateServiceFixture {
                 settlementRepository, breakdownRepository, splitRepository, conditionRepository,
                 repairRepository, propertyRepository, typeRepository, statusResolver,
                 payPaymentClient, agreementService, financeService, properties,
-                noticeMapper, stateMapper, new AuditTrail(objectMapper, auditLogWriter), pager);
+                noticeMapper, stateMapper, new AuditTrail(objectMapper, auditLogWriter), pager,
+                new com.notraius.common.services.LeaseAnnouncer(null, null, objectMapper));
     }
 }

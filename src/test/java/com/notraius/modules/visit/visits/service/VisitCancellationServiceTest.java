@@ -74,7 +74,8 @@ class VisitCancellationServiceTest {
         NotraiusProperties properties = new NotraiusProperties();
         properties.setVisitCancelHorizonHours(24);
         VisitLedgerService ledger = new VisitLedgerService(visitRepository, payPaymentClient,
-                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter));
+                statusResolver, new VisitMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter),
+                null, null, new ObjectMapper().findAndRegisterModules());
         service = new VisitServiceFixture()
                 .visitRepository(visitRepository)
                 .visitLedgerService(ledger)

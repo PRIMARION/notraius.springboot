@@ -1,6 +1,8 @@
 package com.notraius.common.services;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.notraius.common.audit.AuditTrail;
 import com.notraius.common.integration.PayPaymentClient;
 import com.notraius.database.entities.reference.Entities;
@@ -11,9 +13,13 @@ import com.notraius.modules.core.common.constants.NotraiusStatuses;
 import com.notraius.modules.visit.visits.dto.response.VisitResponse;
 import com.notraius.modules.visit.visits.mapper.VisitMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.primarion.module.communication.notification.service.NotificationService;
+import org.primarion.module.infra.webhook.service.WebhookDispatchHelper;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -38,17 +44,26 @@ public class VisitLedgerService {
     private final StatusResolver statusResolver;
     private final VisitMapper visitMapper;
     private final AuditTrail auditTrail;
+    private final WebhookDispatchHelper webhookDispatchHelper;
+    private final NotificationService notificationService;
+    private final ObjectMapper objectMapper;
 
     public VisitLedgerService(VisitRepository visitRepository,
                               PayPaymentClient payPaymentClient,
                               StatusResolver statusResolver,
                               VisitMapper visitMapper,
-                              AuditTrail auditTrail) {
+                              AuditTrail auditTrail,
+                              WebhookDispatchHelper webhookDispatchHelper,
+                              NotificationService notificationService,
+                              ObjectMapper objectMapper) {
         this.visitRepository = visitRepository;
         this.payPaymentClient = payPaymentClient;
         this.statusResolver = statusResolver;
         this.visitMapper = visitMapper;
         this.auditTrail = auditTrail;
+        this.webhookDispatchHelper = webhookDispatchHelper;
+        this.notificationService = notificationService;
+        this.objectMapper = objectMapper;
     }
 
     /** Hand the whole custody back to the visitor — the module's only refund shape. */
@@ -83,7 +98,67 @@ public class VisitLedgerService {
         visitRepository.save(visit);
         VisitResponse after = visitMapper.toResponse(visit);
         audit(activityCode, visit.getId(), operation, after, before);
+        announceTerminal(visit, statusCode, operation);
         return after;
+    }
+
+    /**
+     * A terminal word is public fact: the money and the state moved for every
+     * party at once, so every party with a webhook registration hears it and
+     * every party gets the in-app notice (the ledger does not know who acted —
+     * cancel, complete, sweep and staff resolution all arrive here). Best-effort
+     * by contract: dispatch is fail-soft inside the helper, and a refused
+     * notice must never roll back the settlement it accompanies.
+     */
+    private void announceTerminal(Visit visit, String statusCode, String operation) {
+        if (webhookDispatchHelper == null) {
+            return;
+        }
+        LinkedHashSet<UUID> parties = new LinkedHashSet<>();
+        if (visit.getVisitorId() != null) {
+            parties.add(visit.getVisitorId());
+        }
+        if (visit.getOwnerId() != null) {
+            parties.add(visit.getOwnerId());
+        }
+        if (visit.getUserId() != null) {
+            parties.add(visit.getUserId());
+        }
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("event", statusCode);
+        payload.put("visitId", visit.getId().toString());
+        payload.put("operation", operation);
+        payload.put("status", statusCode);
+        if (visit.getVisitorId() != null) {
+            payload.put("visitorId", visit.getVisitorId().toString());
+        }
+        if (visit.getOwnerId() != null) {
+            payload.put("ownerId", visit.getOwnerId().toString());
+        }
+        if (visit.getUserId() != null) {
+            payload.put("assignedUserId", visit.getUserId().toString());
+        }
+        payload.put("amount", visit.getAmount() != null ? visit.getAmount().toPlainString() : null);
+        webhookDispatchHelper.dispatchToUsers(List.copyOf(parties),
+                NotraiusActivities.VISITS, statusCode, payload);
+
+        String title;
+        String message;
+        switch (statusCode) {
+            case NotraiusStatuses.VISIT_COMPLETED ->
+                    message = "Visit " + visit.getId() + " is completed and the held money settled.";
+            case NotraiusStatuses.VISIT_EXPIRED ->
+                    message = "Visit " + visit.getId() + " expired before it could happen; the held money was returned.";
+            default -> message = "Visit " + visit.getId() + " was " + statusCode + " (" + operation + ").";
+        }
+        title = "Visit " + statusCode.toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        for (UUID party : parties) {
+            try {
+                notificationService.createNotification(party, title, message, Entities.VISITS, null);
+            } catch (RuntimeException e) {
+                log.warn("Visit {} notice deferred for user {}: {}", visit.getId(), party, e.getMessage());
+            }
+        }
     }
 
     /** EXPIRED: the clock's word — nothing happened, so the money goes home. */

@@ -17,6 +17,8 @@ import com.notraius.modules.core.common.schedule.SweepTestSupport;
 import com.notraius.modules.visit.visits.mapper.VisitMapper;
 import org.primarion.module.access.activity.database.repositories.ActivityRepository;
 import org.primarion.module.access.audit.AuditLogWriter;
+import org.primarion.module.communication.notification.service.NotificationService;
+import org.primarion.module.infra.webhook.service.WebhookDispatchHelper;
 import org.primarion.module.utils.security.users.UserClient;
 
 /**
@@ -41,6 +43,18 @@ final class VisitServiceFixture {
     private ValidityRepository validityRepository;
     private LogsRepository logsRepository;
     private SweepPager sweeps;
+    private WebhookDispatchHelper webhookDispatchHelper;
+    private NotificationService notificationService;
+
+    VisitServiceFixture webhookDispatchHelper(WebhookDispatchHelper value) {
+        this.webhookDispatchHelper = value;
+        return this;
+    }
+
+    VisitServiceFixture notificationService(NotificationService value) {
+        this.notificationService = value;
+        return this;
+    }
 
     VisitServiceFixture visitRepository(VisitRepository value) {
         this.visitRepository = value;
@@ -127,6 +141,6 @@ final class VisitServiceFixture {
         return new VisitService(visitRepository, payPaymentClient, statusResolver, visitMapper, userClient,
                 new AuditTrail(objectMapper, auditLogWriter), assessmentClient, activityRepository, properties,
                 visitLedgerService, visitTurnReader, visitPricingRepository, validityRepository, logsRepository,
-                pager);
+                pager, webhookDispatchHelper, notificationService, objectMapper);
     }
 }

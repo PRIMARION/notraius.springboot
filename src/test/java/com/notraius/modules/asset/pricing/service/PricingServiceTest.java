@@ -94,7 +94,7 @@ class PricingServiceTest {
         service = new PricingService(propertyRepository, pricingRepository, valueRepository, typeRepository,
                 durationRepository, validityRepository, policyValueSeeder, statusResolver,
                 new PricingMapper(), new AuditTrail(new ObjectMapper().findAndRegisterModules(), auditLogWriter),
-                revisionService);
+                revisionService, null, new ObjectMapper().findAndRegisterModules());
         lenient().when(statusResolver.resolve(any(), any()))
                 .thenAnswer(invocation -> status(invocation.getArgument(1)));
         lenient().when(statusResolver.openValidity(any(), any())).thenAnswer(invocation -> new Validity());
