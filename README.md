@@ -44,7 +44,7 @@ activity/operation pairs the permission layer reconciles in
 ## API surface
 
 **206 HTTP endpoints across 11 controllers**: every handler declares exactly
-one rung — an `@authz.authority(...)` gate or the `UNAUTHENTICATED` door — and
+one rung — an `@authz.authority(...)` gate or the `ANONYMOUS` door — and
 `DoorRegistry` derives the servlet chain, the key floor and the Swagger lock
 from that single declaration. An undeclared handler fails the boot.
 
@@ -61,6 +61,13 @@ from that single declaration. An undeclared handler fails the boot.
 | `VisitPricingController` | `/api/v1/notraius/visit-pricings` | 11 |
 | `TermsController` | `/api/v1/notraius/asset` | 15 |
 | `LeaseFinanceController` | `/api/v1/notraius/leases` | 7 |
+
+On top of these, notarius serves the shared **marketplace** module's
+controllers (`/api/v1/market/**`) and the shared **engagement** module's
+controllers (`${app.engagement.base-path:/api/v1/engagement}` — capabilities,
+impressions, reactions, comments, collections, affinities, feed), which
+declare their own rungs and are self-seeded into `access.permissions` by
+`PermissionSeeder` at boot.
 
 Bulk reads go through `BulkRunner` (`/batch` routes), which answers per-id with
 the same service gate as the single read — a batch never widens access.
@@ -98,7 +105,43 @@ Three doctrines the module holds:
   able to see that a home is taken.
 
 The full audit of all 206 endpoints, its four findings, and the decided access
-model are recorded in [`UPGRADE.md`](UPGRADE.md).
+model are reflected directly in the code (each `@PreAuthorize` rung, the
+`PublicSurfaceTest` pins, and the 404-over-403 call sites document themselves).
+
+## Marketplace + engagement
+
+Beyond its own rental domain, notarius assembles two estate-wide shared
+modules and wires them together:
+
+- **`MarketplaceModule`** — the estate's marketplace engine (products,
+  variants, specs, stores, categories, cards) running on notarius' own
+  `reference`/`store`/`variant`/`card` schemas. PRODUCT/STORE rows are seeded
+  into `notraius.entities` (V44); the marketplace schemas were created by
+  V44 (`db/migration/V44__marketplace.sql`).
+- **`EngagementModule`** — the learning loop (impressions, reactions,
+  comments, collections, affinities, personalised feed), tables in
+  `impression`/`collection`/`preference` (V45/V46).
+
+The wiring the host owns lives in `modules/engagement/`:
+
+| Seam | Rule |
+|---|---|
+| `NotariusEngagementReferences` | entity codes resolve against `notraius.entities`; PROPERTY engageable while PUBLISHED **or LEASED** (a taken home stays discussable; the feed pool stays PUBLISHED-only); PRODUCT engageable while PUBLISHED; existence is the row's own table; missing rows deny |
+| `NotariusReactionTypes` | the `REACTIONS` type catalogue is the reaction vocabulary — kinds are `config.types` rows (ACTIVE), added as data, never in a deployment file; each kind's 1–100 weight is an `impression.reaction_types` row configured through the admin score endpoints |
+| `NotariusFeedCandidateProvider` | properties: PUBLISHED-only pool |
+| `NotariusMarketFeedCandidateProvider` | marketplace goods: `ProductRepository.feedPool` — PUBLISHED goods of ACTIVE stores |
+| `NotariusFeedHydrator` | renders both surfaces at chunk time, re-checking eligibility; cards carry views/reactions/comments under the same keys the market page reads |
+
+`FeedService` takes `List<FeedCandidateProvider>` — both pools merge
+(first declaration wins duplicates) and rank as one. There is no capability
+declaration and no action matrix: importing `EngagementModule` brings the
+surface live, and `NotariusEngagementReferences` answers per row whether it is
+engageable. Reaction kinds are live `config.types` rows under the `REACTIONS`
+entity, and their weights are `impression.reaction_types` rows on a 1–100
+scale (50 = neutral), configured through the admin score endpoints — the
+reaction row carries only the type id plus the weight snapshot it was recorded
+with, never a client-supplied score. Reactions are impression-level only, never
+comment-level. Comment threads have no depth ceiling.
 
 ## Structure
 
@@ -118,7 +161,9 @@ src/main/java/com/notraius/
     ├── config/{reference,rules,policies}/
     ├── lease/{agreement,finance,state}/
     ├── visit/{visits,pricings}/
-    └── core/{access,app,common}/         # constants, role lookup, guards
+    ├── core/{access,app,common}/         # constants, role lookup, guards
+    ├── marketplace/                      # marketplace module assembly
+    └── engagement/                       # engagement seams (see below)
 ```
 
 Each feature is a vertical slice — `controller` / `service` / `dto` (plus
@@ -130,18 +175,26 @@ repositories, 66 DTOs, 14 service classes.
 
 ## Data layer
 
-- **41 Flyway migrations** in `db/migration` (`V1`–`V42`, `V13` was never
+- **46 Flyway migrations** in `db/migration` (`V1`–`V47`, `V13` was never
   issued). They bootstrap the shared estate schemas (access, app,
   communication, event, security, subscription, plus the V8 subfeature split
   into chat / support / webhook / storage / rate), the notraius host schema
   (entities / statuses / validity / attachments), audit-log partitioning, rate
-  limits, and the permission sweeps.
+  limits, the permission sweeps, the marketplace module's
+  `reference`/`store`/`variant`/`card` schemas (V44), the engagement module's
+  `impression`/`collection`/`preference` schemas with the scored reaction types
+  and comment-tsvector signals (V45/V46), the discount floor/cap purge (V47),
+  and the move of the type catalogue to `config.types` plus the
+  `reference.specs.type_id` hierarchy (V48).
 - **Lookup vocabulary** in `db/lookups/notraius.yaml`.
+- **Reaction-kind vocabulary** in `config.types` under the `REACTIONS`
+  entity (a data row per kind — no deployment file), and its 1–100 weight in
+  `impression.reaction_types` (one admin-seeded row per kind).
 - **Ownership rule:** the notraius database holds every row owned by this
   service plus the shared-module rows that ride each consuming host (chat,
-  support, storage, webhook). Foreign-domain data (identity, geo, media
-  catalog) lives in the shared lookup database and is read through
-  `app.shared.datasource` — **never copied**.
+  support, storage, webhook, marketplace, engagement). Foreign-domain data
+  (identity, geo, media catalog) lives in the shared lookup database and is
+  read through `app.shared.datasource` — **never copied**.
 - **Service keys are per-service** (`#AUTH-CENTRAL`): `APP_PUBLIC_KEY` /
   `APP_PRIVATE_KEY` (a fresh RSA-2048 pair) and `HMAC_KEY` must never match
   another service's.
@@ -156,9 +209,10 @@ only what the library leaves to the host:
 |---|---|
 | `OwnershipGuard` subclasses (`canAccess`) | `modules/*/service/*Service` — the consent/seat fallback in `requireOwnership` comes from shared |
 | `ValidityPort` over `notraius.validity` | `NotraiusValidityAdapter` — `findMany` is **one** `IN` query, not the port's default per-row loop the event scan would pay 100×/tick |
+| Engagement seams (policy, entity lookup, feed pools, hydrator) | `modules/engagement/` — see the Marketplace + engagement section above |
 | `StatusPort`, `AppStatusResolver`, `AttachmentStatusResolver`, `WebhookStatusResolver`, `RoleLookupService`, `UsageCounter`, `EntityByIdResolver` | `modules/core`, `config/communication` |
 | `endpoints.yaml` (`EndpointRegistry`) | every inter-service call resolves through it — no endpoint string in Java |
-| Public doors (`UNAUTHENTICATED` / `ANONYMOUS`) | declared on the handler; `DoorRegistry` (shared) derives the chain + Swagger, `PublicSurfaceTest` proves the declarations |
+| Public doors (`ANONYMOUS` open / `UNAUTHENTICATED` key-only) | declared on the handler; `DoorRegistry` (shared) derives the chain + Swagger, `PublicSurfaceTest` proves the declarations |
 
 What the host takes as-is: the audit sink (`AuditLogWriter` + `JdbcSavepoint`,
 so an audit failure never rolls back the row it observes), partition management
@@ -182,8 +236,8 @@ any other value — pruning audit partitions would delete the chain behind
 
 | Measure | Value |
 |---|---|
-| Test classes | 46 files (48 suites, incl. nested groups) |
-| Test cases | **417** (13 of them run only where `NOTRAIUS_SQL_URL` points at a migrated database) |
+| Test classes | 49 files (incl. fixture helpers) |
+| Test cases | **431** (13 of them run only where `NOTRAIUS_SQL_URL` points at a migrated database) |
 | Test source LOC | 12,913 — **48.5% of main source** |
 | Services reached by a test | **12 / 12** |
 | Failures | 0 |
@@ -336,9 +390,9 @@ door. An as-of page is bounded by the rows that still exist, so a pricing
 removed after the instant is not replayed. All three are additive work, not
 corrections.
 
-### Every lock has a door (the chicken-and-egg audit, UPGRADE §11)
+### Every lock has a door (the chicken-and-egg audit)
 
-A promise in `PLAN.md` is only real if some endpoint can keep it. The rules that
+A promise is only real if some endpoint can keep it. The rules that
 follow exist because each one closed a state the module could enter but never
 leave:
 
@@ -387,23 +441,26 @@ can repeat a row on page two while dropping another.
 ```bash
 # postgres + redis must be up (see the estate compose file)
 ./gradlew bootRun          # loads .env, migrates via Flyway, serves :8090
-./gradlew test             # 417 tests
+./gradlew test             # 431 tests (13 SQL-gated)
 curl localhost:8090/actuator/health
 ```
 
 `.env.example` documents every variable; `.env` carries the dev values
-(localhost DB/Redis, dev secrets, port 8090). Note that `PUBLIC_ENDPOINTS` is
-empty by default, so every route requires a session.
+(localhost DB/Redis, dev secrets, port 8090). There are no door environment
+lists: an anonymous read is declared on the handler itself as the
+`UNAUTHENTICATED GTE PUBLIC …` rung (`PublicSurfaceTest` pins the agreement).
 
 ## Documentation
 
 | File | What it is |
 |---|---|
-| [`PLAN.md`](PLAN.md) | The thinking layer — 3,166 lines covering the guard estate, then types → durations → config → asset → visits → lease → cross-cutting laws |
 | [`DATABASE.txt`](DATABASE.txt) | **The schema authority** (v4.0, Consolidée). Read in full; edited only with operator approval |
-| [`UPGRADE.md`](UPGRADE.md) | The access-control audit: 201-endpoint review, four findings, chicken-and-egg analysis, and the decided D1–D3 / N1 model with its implementation surface |
 | [`CLARIFICATION.txt`](CLARIFICATION.txt) | Operator rulings applied to the plan |
-| [`../UPGRADE.txt`](../UPGRADE.txt) | Estate-wide upgrade record |
+| [`../docs/GAPS.md`](../docs/GAPS.md) | The estate-wide gap tracker (per-pass records and open issues) |
+| [`../docs/REPORT.md`](../docs/REPORT.md) | Estate-wide audit report |
+
+The former `PLAN.md` and `UPGRADE.md` were retired from the repo; their
+decisions live in the code, this README, and `../docs/`.
 
 ## Naming
 
