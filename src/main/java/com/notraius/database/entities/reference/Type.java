@@ -18,18 +18,20 @@ import java.util.UUID;
  * A type: a labelled code bound to an entity — "this kind of row belongs to
  * that kind of thing" (PLAN.md Part 1).
  * <p>
- * The {@code entity} binding is the namespace: the property's kind is a type
- * under {@code PROPERTY}, a pricing cadence a type under {@code PRICINGS}, a
- * time unit a type under {@code DURATION_UNIT}. Two rows may share a code
- * across entities; the same code twice under one entity is the same type and
- * is refused.
+ * The catalogue lives in {@code config.types} — configuration, not marketplace
+ * reference data — and the {@code entity} binding is the namespace: the
+ * property's kind is a type under {@code PROPERTY}, a pricing cadence a type
+ * under {@code PRICINGS}, a time unit a type under {@code DURATION_UNIT}, a
+ * reaction kind under {@code REACTIONS}, a spec grouping under {@code SPEC}.
+ * Two rows may share a code across entities; the same code twice under one
+ * entity is the same type and is refused.
  * <p>
  * The hierarchy is self-referential through {@code type_id} ({@link #parent});
  * a null parent is a root. Parent links always mean "kind of" and never carry
  * their own type — the catalogue has one axis.
  */
 @Entity
-@Table(name = "types", schema = "notraius",
+@Table(name = "types", schema = "config",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_types_entity_code", columnNames = {"entity_id", "code"}),
         indexes = {

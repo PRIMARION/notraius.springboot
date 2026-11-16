@@ -5,6 +5,7 @@ import com.notraius.database.entities.reference.Status;
 import com.notraius.database.repositories.LogsRepository;
 import com.notraius.database.repositories.reference.EntitiesRepository;
 import com.notraius.database.repositories.reference.StatusRepository;
+import com.notraius.database.repositories.reference.TypeRepository;
 import com.notraius.database.repositories.reference.ValidityRepository;
 import org.primarion.module.access.activity.database.repositories.ActivityRepository;
 import org.primarion.module.communication.support.database.repositories.SupportTicketRepository;
@@ -24,9 +25,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Binds the notraius registries to the marketplace module's ten seams.
+ * Binds the notraius registries to the marketplace module's eleven seams.
  * <p>
- * Dictionary rows (entities, statuses, activities, validity windows) are
+ * Dictionary rows (entities, statuses, types, activities, validity windows) are
  * notraius rows converted to the module's view records; users resolve through
  * the shared {@link UserService} because primarion owns identity. Currencies and
  * payment methods are pay rows read through {@link MarketplacePayCatalogue} —
@@ -58,6 +59,7 @@ public class MarketplaceModuleConfig {
             MarketplacePayCatalogue payCatalogue,
             SupportTicketRepository ticketRepository,
             LogsRepository logsRepository,
+            TypeRepository typeRepository,
             ObjectProvider<MarketplaceBindings.AttachmentSource> attachmentSource) {
         MarketplaceBindings.Builder builder = MarketplaceBindings.builder()
                 .statuses(new MarketplaceBindings.StatusSource() {
@@ -74,6 +76,12 @@ public class MarketplaceModuleConfig {
                     }
                 })
                 .entities(code -> entitiesRepository.findByCode(code).map(Entities::getId))
+                .types((typeId, entityCode) -> typeRepository.findById(typeId)
+                        .filter(type -> type.getEntity() != null
+                                && entityCode.equalsIgnoreCase(type.getEntity().getCode()))
+                        .filter(type -> type.getStatus() != null
+                                && MarketplaceStatuses.ACTIVE.equalsIgnoreCase(type.getStatus().getCode()))
+                        .map(type -> type.getId()))
                 .activities(code -> activityRepository.findByCode(code).map(activity -> activity.getId()))
                 .validities(new MarketplaceBindings.ValiditySource() {
                     @Override

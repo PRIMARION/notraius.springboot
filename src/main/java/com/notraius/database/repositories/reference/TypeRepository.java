@@ -42,6 +42,10 @@ public interface TypeRepository extends JpaRepository<Type, UUID> {
     /** One catalogue row by its namespace and code — the lease's deposit types. */
     java.util.Optional<Type> findByEntityCodeAndCode(String entityCode, String code);
 
+    /** The live rows of one namespace — the reaction kinds the client may offer. */
+    java.util.List<Type> findByEntityCodeAndStatusCodeOrderByCodeAsc(
+            String entityCode, String statusCode);
+
     /** Children of a node — the delete gate and the reparent cycle walk. */
     boolean existsByParentId(UUID parentId);
 }

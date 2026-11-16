@@ -506,7 +506,7 @@ class VisitSqlBootTest {
     /** A type under an entity, created once per call and reused by (entity, code). */
     private UUID typeOf(String entityCode, String code) {
         List<UUID> existing = jdbc.queryForList(
-                "SELECT t.id FROM notraius.types t JOIN notraius.entities e ON e.id = t.entity_id "
+                "SELECT t.id FROM config.types t JOIN notraius.entities e ON e.id = t.entity_id "
                         + "WHERE e.code = ? AND t.code = ?", UUID.class, entityCode, code);
         if (!existing.isEmpty()) {
             return existing.getFirst();
@@ -514,7 +514,7 @@ class VisitSqlBootTest {
         UUID entityId = jdbc.queryForObject("SELECT id FROM notraius.entities WHERE code = ?",
                 UUID.class, entityCode);
         UUID typeId = UUID.randomUUID();
-        exec("INSERT INTO notraius.types (id, created_at, updated_at, entity_id, code, label, status_id) "
+        exec("INSERT INTO config.types (id, created_at, updated_at, entity_id, code, label, status_id) "
                         + "VALUES (?, now(), now(), ?, ?, ?, ?)",
                 typeId, entityId, code, code, lookup("TYPES", "ACTIVE", "statuses"));
         return typeId;
