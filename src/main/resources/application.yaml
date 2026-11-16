@@ -111,6 +111,11 @@ app:
       - com.notraius.modules.core.common.constants.NotraiusActivities
       - org.primarion.module.event.config.EventActivities
       - org.primarion.module.access.external.SharedActivities
+    # [NEW-52] The webhook EVENT vocabulary — every (family, word) pair the
+    # dispatchers can emit is seeded as a subscription-target permission row
+    # (sentinel SYSTEM|GTE; endpoint-declared pairs keep their own policy).
+    event-classes:
+      - com.notraius.modules.core.common.constants.NotraiusWebhookEvents
     # [estate standard] The chat-module families belong to the surface that
     # hosts them; every host excludes them from its local activity registry
     # (same line in pay/logistic/contract/primarion).
