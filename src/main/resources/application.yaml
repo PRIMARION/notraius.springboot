@@ -100,6 +100,12 @@ server:
 app:
   app-code: ${APP_CODE}
 
+  # Flow engine — the pool of events. Off until a broker exists; set
+  # FLOW_ENABLED=true + FLOW_BOOTSTRAP_SERVERS to wake the relay.
+  flow:
+    enabled: ${FLOW_ENABLED:false}
+    bootstrap-servers: ${FLOW_BOOTSTRAP_SERVERS:}
+
   lookup:
     basePath: /api/v1/lookups
     dir: classpath:db/lookups

@@ -27,6 +27,7 @@ import org.primarion.module.engagement.EngagementModule;
 import org.primarion.module.marketplace.MarketplaceModule;
 import org.primarion.module.subscription.SubscriptionModule;
 import org.primarion.module.infra.webhook.WebhookModule;
+import org.primarion.module.flow.FlowModule;
 import org.primarion.module.infra.anomaly.AnomalyModule;
 import org.primarion.module.infra.idempotency.IdempotencyModule;
 import org.primarion.module.infra.tracing.TracingModule;
@@ -79,6 +80,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
     MarketplaceModule.class,
     EngagementModule.class,
     WebhookModule.class,
+    FlowModule.class,
     AnomalyModule.class,
     IdempotencyModule.class,
     TracingModule.class,
