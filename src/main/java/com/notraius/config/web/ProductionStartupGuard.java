@@ -25,9 +25,6 @@ public class ProductionStartupGuard implements CommandLineRunner {
     private final String dbPassword;
     private final String sharedDbPass;
     private final String redisPassword;
-    // #PROBLEMS-B3 (flowmap): the dev-only source/trace explorer must never
-    // boot in production, even if someone ships FLOWMAP_ENABLED=true in .env.
-    private final boolean flowmapEnabled;
     // The shared partition manager can DROP aged audit months. Its cold-tier
     // export does not exist yet (shared README, decision D1), so retention is
     // OFF everywhere until it does — and a notarius that turned it on would
@@ -41,7 +38,6 @@ public class ProductionStartupGuard implements CommandLineRunner {
             @Value("${spring.datasource.password:}") String dbPassword,
             @Value("${app.shared.datasource.password:}") String sharedDbPass,
             @Value("${spring.data.redis.password:}") String redisPassword,
-            @Value("${app.flowmap.enabled:false}") boolean flowmapEnabled,
             @Value("${app.logs.retention-months:0}") int logsRetentionMonths) {
         this.prodProfile = isProductionProfile(profile);
         this.hmacKey = hmacKey;
@@ -49,7 +45,6 @@ public class ProductionStartupGuard implements CommandLineRunner {
         this.dbPassword = dbPassword;
         this.sharedDbPass = sharedDbPass;
         this.redisPassword = redisPassword;
-        this.flowmapEnabled = flowmapEnabled;
         this.logsRetentionMonths = logsRetentionMonths;
     }
 
@@ -67,9 +62,6 @@ public class ProductionStartupGuard implements CommandLineRunner {
         if (dbPassword == null || dbPassword.isBlank()) violations.add("DB_PASS must be set");
         if (sharedDbPass == null || sharedDbPass.isBlank()) violations.add("SHARED_DB_PASS must be set");
         if (redisPassword == null || redisPassword.isBlank()) violations.add("REDIS_PASS must be set");
-        // #PROBLEMS-B3 (flowmap): source snippets + endpoint traces are a
-        // dev instrument — hard-fail the boot when enabled in production.
-        if (flowmapEnabled) violations.add("FLOWMAP_ENABLED must be false in production (dev-only source explorer)");
         // The audit chain is not an operational log here: it is the storage the
         // version doors read (`?version=N`, `/revisions`, `/pricings/answering`).
         // DROPPING old partitions therefore deletes the past those doors promise,

@@ -100,10 +100,9 @@ server:
 app:
   app-code: ${APP_CODE}
 
-  # Flow engine — the pool of events. Off until a broker exists; set
-  # FLOW_ENABLED=true + FLOW_BOOTSTRAP_SERVERS to wake the relay.
+  # Flow engine — the pool of events. Always on; FLOW_BOOTSTRAP_SERVERS
+  # points the relay at the bus (blank = drain to the debug log).
   flow:
-    enabled: ${FLOW_ENABLED:false}
     bootstrap-servers: ${FLOW_BOOTSTRAP_SERVERS:}
 
   lookup:
@@ -134,7 +133,6 @@ app:
   profile: ${APP_PROFILE:dev}
 
   flowmap:
-    enabled: ${FLOWMAP_ENABLED:false}
     workspace-roots: ${FLOWMAP_WORKSPACE_ROOTS:}
 
   fx:
