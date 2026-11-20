@@ -2,12 +2,14 @@ package com.notraius.common.integration;
 
 import lombok.extern.slf4j.Slf4j;
 import org.primarion.database.autoconfigure.SharedLookupCacheService;
-import org.primarion.module.geo.database.entities.Country;
-import org.primarion.module.geo.database.entities.State;
+import org.primarion.module.configs.database.entities.Country;
+import org.primarion.module.configs.database.entities.State;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 import java.util.UUID;
+import com.notraius.common.integration.pay.MarketCurrency;
+import com.notraius.common.integration.pay.PayCurrencyClient;
 
 /**
  * The third link of the anchor chain: state → currency.

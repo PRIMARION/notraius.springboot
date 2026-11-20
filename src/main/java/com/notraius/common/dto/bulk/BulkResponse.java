@@ -5,6 +5,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import com.notraius.common.dto.bulk.BulkIdsRequest;
+import com.notraius.common.dto.bulk.BulkItemResult;
 
 /**
  * The answer to a bulk call: the counts, and every item's own result in the

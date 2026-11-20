@@ -1,7 +1,7 @@
 package com.notraius.config.web;
 
-import org.primarion.module.infra.tracing.RequestTrace;
-import org.primarion.module.security.ratelimit.service.RateLimitService;
+import org.primarion.module.communication.infra.tracing.tracing.RequestTrace;
+import org.primarion.module.app.security.ratelimit.ratelimit.service.RateLimitService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;

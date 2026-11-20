@@ -7,7 +7,7 @@ import java.util.UUID;
 /**
  * A host audit sink whose caller may <b>demand</b> the write.
  * <p>
- * The shared {@link org.primarion.module.access.audit.AuditLogWriter} states the
+ * The shared {@link org.primarion.module.app.access.consent.AuditLogWriter} states the
  * estate's default posture: a caller treats the write as fail-soft, because an
  * audit row must never roll back the business transaction it observes. That is
  * right for an audit trail read by humans.
@@ -25,7 +25,7 @@ import java.util.UUID;
  * reads its history by version, so an audit gap costs a log line, not an
  * answer.
  */
-public interface RequiredAuditWriter extends org.primarion.module.access.audit.AuditLogWriter {
+public interface RequiredAuditWriter extends org.primarion.module.app.access.consent.AuditLogWriter {
 
     /**
      * Append one audit entry, propagating any failure to the caller.

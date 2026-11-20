@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import com.notraius.common.dto.bulk.BulkIdsRequest;
 
 /**
  * The body of a bulk <i>create</i>: the payloads, in one round trip.

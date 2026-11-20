@@ -1,20 +1,21 @@
 package com.notraius.config.communication;
 
-import com.notraius.database.entities.reference.Entities;
-import com.notraius.database.entities.reference.Status;
-import com.notraius.database.repositories.reference.EntitiesRepository;
-import com.notraius.database.repositories.reference.StatusRepository;
-import org.primarion.module.utils.security.identity.ResolvedUser;
-import org.primarion.module.utils.security.users.UserService;
-import org.primarion.module.access.activity.database.repositories.ActivityRepository;
-import org.primarion.module.communication.notification.service.NotificationService;
-import org.primarion.module.event.EventModule;
-import org.primarion.module.event.config.EventBindings;
+import com.notraius.database.entities.lease.reference.amenity.Entities;
+import com.notraius.database.entities.lease.reference.status.Status;
+import com.notraius.database.repositories.lease.reference.duration.EntitiesRepository;
+import com.notraius.database.repositories.lease.reference.duration.StatusRepository;
+import org.primarion.module.utils.utils.security.security.identity.ResolvedUser;
+import org.primarion.module.utils.utils.security.security.users.user.UserService;
+import org.primarion.module.app.access.consent.database.ActivityRepository;
+import org.primarion.module.communication.communication.communication.notification.service.NotificationService;
+import org.primarion.module.configs.event.event.EventModule;
+import org.primarion.module.configs.event.event.config.EventBindings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Binds the notraius microservice's registries to the shared event module.

@@ -1,14 +1,14 @@
 package com.notraius.config.communication;
 
-import com.notraius.database.entities.reference.Status;
-import com.notraius.database.repositories.reference.EntitiesRepository;
-import com.notraius.database.repositories.reference.StatusRepository;
-import org.primarion.module.errors.CommonErrors;
-import org.primarion.module.errors.NotFoundException;
+import com.notraius.database.entities.lease.reference.status.Status;
+import com.notraius.database.repositories.lease.reference.duration.EntitiesRepository;
+import com.notraius.database.repositories.lease.reference.duration.StatusRepository;
+import org.primarion.module.communication.errors.web.CommonErrors;
+import org.primarion.module.communication.errors.client.NotFoundException;
 import org.primarion.database.entities.lifecycle.StatusPort;
-import org.primarion.module.utils.security.users.UserService;
-import org.primarion.module.communication.core.dto.ResolvedStatus;
-import org.primarion.module.subscription.config.SubscriptionBindings;
+import org.primarion.module.utils.utils.security.security.users.user.UserService;
+import org.primarion.module.communication.communication.communication.core.communication.dto.ResolvedStatus;
+import org.primarion.module.app.subscription.config.SubscriptionBindings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 

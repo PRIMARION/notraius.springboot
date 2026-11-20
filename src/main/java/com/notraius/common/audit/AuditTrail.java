@@ -3,10 +3,11 @@ package com.notraius.common.audit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.primarion.module.access.audit.AuditLogWriter;
+import org.primarion.module.app.access.consent.AuditLogWriter;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
+import com.notraius.common.audit.RequiredAuditWriter;
 
 /**
  * The one place a notraius module writes an audit entry.

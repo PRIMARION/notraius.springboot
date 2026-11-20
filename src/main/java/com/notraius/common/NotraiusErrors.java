@@ -1,8 +1,18 @@
 package com.notraius.common;
 
 import lombok.Getter;
-import org.primarion.module.errors.ErrorCategory;
-import org.primarion.module.errors.ErrorCode;
+import org.primarion.module.communication.errors.core.ErrorCategory;
+import org.primarion.module.communication.errors.core.ErrorCode;
+import com.notraius.database.entities.asset.asset.Pricing;
+import com.notraius.database.entities.asset.asset.Property;
+import com.notraius.database.entities.asset.config.Policy;
+import com.notraius.database.entities.asset.config.Rule;
+import com.notraius.database.entities.lease.lease.records.Lease;
+import com.notraius.database.entities.lease.reference.amenity.Amenity;
+import com.notraius.database.entities.lease.reference.status.Duration;
+import com.notraius.database.entities.lease.reference.status.Type;
+import com.notraius.database.entities.lease.visit.Visit;
+import java.util.List;
 
 /**
  * Notraius error catalog.

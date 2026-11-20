@@ -7,10 +7,13 @@ import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.primarion.module.errors.BadRequestException;
+import org.primarion.module.communication.errors.client.BadRequestException;
 
 import java.util.List;
 import java.util.UUID;
+import org.primarion.module.communication.errors.core.ApiError;
+import com.notraius.common.dto.bulk.BulkResponse;
+import java.util.Objects;
 
 /**
  * The body of every bulk door: the ids the caller wants acted on, in one round
